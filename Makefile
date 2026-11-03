@@ -1,94 +1,135 @@
-# Makefile
-# Building and launching hi!Kernel
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# hix - hi is not unix. A hybrid kernel for i386.
+#
+#   make              build build/hix.elf and, if GRUB is present, build/hix.iso
+#   make run          boot the kernel in QEMU (no GRUB needed: -kernel)
+#   make run-iso      boot the GRUB rescue ISO in QEMU
+#   make run-serial   like run, with the serial console on your terminal
+#   make test         host-side unit tests (pmm, heap, ipc, vfs, steel, ...)
+#   make check        style check + Multiboot header check
+#   make strict       build with -Werror
+#   make help         this list
+#
+# Variables: V=1 verbose, CROSS_COMPILE=i686-elf- to use a cross toolchain.
 
-CC = gcc
-AS = nasm
-LD = ld
+CROSS_COMPILE ?=
+CC	:= $(CROSS_COMPILE)gcc
+LD	:= $(CROSS_COMPILE)ld
+NASM	:= nasm
+QEMU	?= qemu-system-i386
+BUILD	:= build
 
-CFLAGS  = -m32 -ffreestanding -fno-stack-protector -fno-pic -Wall -Wextra
-LDFLAGS = -m elf_i386 -T linker.ld
+ifeq ($(V),1)
+Q :=
+else
+Q := @
+endif
 
-all: build/hikernel.iso
+VERSION := $(shell sed -n 's/^\#define HIX_RELEASE[[:space:]]*"\(.*\)"/\1/p' include/hix/version.h)
 
-build/boot.o: src/boot.asm
-	mkdir -p build
-	$(AS) -f elf32 src/boot.asm -o build/boot.o
+# --- flags --------------------------------------------------------------
 
-build/kernel.o: src/kernel.c
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/kernel.c -o build/kernel.o
+WARN	:= -Wall -Wextra -Wshadow -Wno-unused-parameter
+ifeq ($(STRICT),1)
+WARN	+= -Werror
+endif
 
-build/vga.o: src/vga.c src/vga.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/vga.c -o build/vga.o
+CFLAGS	:= -m32 -march=i686 -std=gnu11 -O2 -g \
+	   -ffreestanding -fno-builtin -nostdinc -isystem $(shell $(CC) -print-file-name=include) \
+	   -fno-stack-protector -fno-pic -fno-pie -fcf-protection=none \
+	   -fno-asynchronous-unwind-tables -fno-omit-frame-pointer \
+	   -fno-tree-loop-distribute-patterns -fno-common \
+	   -mno-sse -mno-mmx -mno-sse2 -mno-80387 -mno-red-zone \
+	   $(WARN) -Iinclude -MMD -MP
 
-build/string.o: src/string.c src/string.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/string.c -o build/string.o
+NASMFLAGS := -f elf32 -g -F dwarf
 
-build/gdt.o: src/gdt.c src/gdt.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/gdt.c -o build/gdt.o
+LDFLAGS	:= -m elf_i386 -T linker.ld -nostdlib -z noexecstack \
+	   --build-id=none \
+	   $(shell $(LD) --help 2>/dev/null | grep -q no-warn-rwx && echo --no-warn-rwx-segments)
 
-build/gdt_flush.o: src/gdt_flush.asm
-	mkdir -p build
-	$(AS) -f elf32 src/gdt_flush.asm -o build/gdt_flush.o
+# --- sources ------------------------------------------------------------
 
-build/idt.o: src/idt.c src/idt.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/idt.c -o build/idt.o
+C_SRCS	:= $(wildcard arch/x86/*.c kernel/*.c aether/*.c qubix/*.c \
+		      steel/*.c drivers/*.c lib/*.c apps/*.c)
+ASM_SRCS := $(wildcard arch/x86/*.asm)
+OBJS	:= $(addprefix $(BUILD)/,$(C_SRCS:.c=.o) $(ASM_SRCS:.asm=.asm.o))
+DEPS	:= $(OBJS:.o=.d)
 
-build/idt_load.o: src/idt_load.asm
-	mkdir -p build
-	$(AC) -f elf32 src/idt_load.asm -o build/idt_load.o
+# --- targets ------------------------------------------------------------
 
-build/isr_asm.o: src/isr.asm
-	mkdir -p build
-	$(AS) -f elf32 src/isr.asm -o build/isr_asm.o
+.PHONY: all kernel iso run run-iso run-serial debug test check strict \
+	clean distclean help
+.DEFAULT_GOAL := all
 
-build/isr.o: src/isr.c src/isr.h src/vga.h src/string.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/isr.c -o build/isr.o
+all: kernel
+	$(Q)if command -v grub-mkrescue >/dev/null 2>&1 || \
+	      command -v grub2-mkrescue >/dev/null 2>&1; then \
+		$(MAKE) --no-print-directory iso; \
+	else \
+		echo "  (grub-mkrescue not found: skipping the ISO, use 'make run')"; \
+	fi
 
-build/pic.o: src/pic.c src/pic.h src/ports.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/pic.c -o build/pic.o
+kernel: $(BUILD)/hix.elf
 
-build/irq_asm.o: src/irq.asm
-	mkdir -p build
-	$(AS) -f elf32 src/irq.asm -o build/irq_asm.o
+$(BUILD)/hix.elf: $(OBJS) linker.ld
+	@echo "  LD      $@"
+	$(Q)$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	$(Q)$(CROSS_COMPILE)size $@ 2>/dev/null || true
 
-build/irq.o: src/irq.c src/irq.h src/isr.h src/ports.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/irq.c -o build/irq.o
+$(BUILD)/%.o: %.c
+	@echo "  CC      $<"
+	@mkdir -p $(dir $@)
+	$(Q)$(CC) $(CFLAGS) -DHIX_VERSION=\"$(VERSION)\" -c $< -o $@
 
-build/timer.o: src/timer.c src/timer.h src/ports.h src/isr.h src/irq.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/timer.c -o build/timer.o
+$(BUILD)/%.asm.o: %.asm
+	@echo "  NASM    $<"
+	@mkdir -p $(dir $@)
+	$(Q)$(NASM) $(NASMFLAGS) $< -o $@
 
-build/shell.o: src/shell.c src/shell.h src/vga.h src/string.h src/timer.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/shell.c -o build/shell.o
+iso: $(BUILD)/hix.iso
 
-build/keyboard.o: src/keyboard.c src/keyboard.h src/ports.h src/isr.h src/irq.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/keyboard.c -o build/keyboard.o
+$(BUILD)/hix.iso: $(BUILD)/hix.elf iso/boot/grub/grub.cfg
+	@echo "  ISO     $@"
+	$(Q)rm -rf $(BUILD)/isoroot && mkdir -p $(BUILD)/isoroot/boot/grub
+	$(Q)cp $(BUILD)/hix.elf $(BUILD)/isoroot/boot/hix.elf
+	$(Q)cp iso/boot/grub/grub.cfg $(BUILD)/isoroot/boot/grub/grub.cfg
+	$(Q)(grub-mkrescue -o $@ $(BUILD)/isoroot || \
+	     grub2-mkrescue -o $@ $(BUILD)/isoroot) >/dev/null 2>&1
 
-build/pmm.o: src/pmm.c src/pmm.h src/multiboot.h
-	mkdir -p build
-	$(CC) $(CFLAGS) -c src/pmm.c -o build/pmm.o
+QEMU_FLAGS := -m 128M
 
-build/kernel.elf: build/boot.o build/kernel.o build/vga.o build/string.o build/gdt.o build/gdt_flush.o build/idt.o build/idt_load.o build/isr_asm.o build/isr.o build/pic.o build/irq_asm.o build/irq.o build/timer.o build/keyboard.o build/shell.o build/pmm.o linker.ld
-	$(LD) $(LDFLAGS) -o build/kernel.elf build/boot.o build/kernel.o build/vga.o build/string.o build/gdt.o build/gdt_flush.o build/idt.o build/idt_load.o build/isr_asm.o build/isr.o build/pic.o build/irq_asm.o build/irq.o build/timer.o build/keyboard.o build/shell.o build/pmm.o
+run: kernel
+	$(QEMU) $(QEMU_FLAGS) -kernel $(BUILD)/hix.elf
 
-build/hikernel.iso: build/kernel.elf iso/boot/grub/grub.cfg
-	cp build/kernel.elf iso/boot/kernel.elf
-	grub-mkrescue -o build/hikernel.iso iso
+run-serial: kernel
+	$(QEMU) $(QEMU_FLAGS) -kernel $(BUILD)/hix.elf -serial stdio
 
-run: build/hikernel.iso
-	qemu-system-i386 -cdrom build/hikernel.iso
+run-iso: iso
+	$(QEMU) $(QEMU_FLAGS) -cdrom $(BUILD)/hix.iso
+
+debug: kernel
+	$(QEMU) $(QEMU_FLAGS) -kernel $(BUILD)/hix.elf -serial stdio -s -S
+
+strict:
+	$(MAKE) clean
+	$(MAKE) STRICT=1 kernel
+
+test:
+	$(MAKE) -C tests run
+
+check: kernel
+	@scripts/check-style.sh
+	@python3 scripts/check-multiboot.py $(BUILD)/hix.elf
 
 clean:
-	rm -f build/boot.o build/kernel.o build/vga.o build/string.o build/gdt.o build/gdt_flush.o build/idt.o build/idt_load.o build/isr_asm.o build/isr.o build/pic.o build/irq_asm.o build/irq.o build/timer.o build/keyboard.o build/shell.o build/pmm.o build/kernel.elf build/hikernel.iso iso/boot/kernel.elf
+	rm -rf $(BUILD)
+	$(MAKE) -C tests clean
 
-.PHONY: all run clean
+distclean: clean
+
+help:
+	@sed -n '2,15p' Makefile | sed 's/^# \{0,1\}//'
+
+-include $(DEPS)
