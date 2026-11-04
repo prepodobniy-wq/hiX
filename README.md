@@ -11,7 +11,7 @@
 
 # hiX — hi is not unix
 
-A hybrid kernel for i386, grown from your hi-Kernel 0.1.0. The kernel is divided into
+A hybrid kernel for i386, grown from hi-Kernel 0.1.0. The kernel is divided into
 layers with their own names, and the code is styled according to the Linux coding style. Version: **0.3.1**.
 
 | Name | Role | Where |
