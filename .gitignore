@@ -1,6 +1,7 @@
 # .gitignore
-
 build/
-iso/boot/kernel.elf
+tests/build/
 *.o
+*.d
+*.iso
 qemu.log
