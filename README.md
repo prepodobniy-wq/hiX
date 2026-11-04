@@ -24,13 +24,13 @@ layers with their own names, and the code is styled according to the Linux codin
 
 ## Build and Run
 
-    make              # build/hix.elf (+ build/hix.iso, if grub-mkrescue is available)
-    make run          # QEMU directly, without GRUB:  qemu-system-i386 -kernel
-    make run-serial   # same + COM1 console in your terminal
-    make run-iso      # via GRUB
-    make test         # host tests (including chess engine with perft)
-    make check        # style + multiboot header check
-    make strict       # build with -Werror
+    make              ` build/hix.elf (+ build/hix.iso, if grub-mkrescue is available) `
+    make run          ` QEMU directly, without GRUB:  qemu-system-i386 -kernel `
+    make run-serial   ` same + COM1 console in your terminal `
+    make run-iso      ` via GRUB `
+    make test         ` host tests (including chess engine with perft) `
+    make check        ` style + multiboot header check `
+    make strict       ` build with -Werror `
 
 Requirements: gcc (with -m32), nasm, ld; for ISO — grub-mkrescue + xorriso; for running — QEMU.
 
