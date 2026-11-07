@@ -320,3 +320,47 @@ void gfx_text_center(struct gfx_canvas *c, const struct gfx_font *f, int x,
 {
 	gfx_text(c, f, x + (w - gfx_text_width(f, s)) / 2, y, s, color);
 }
+
+void gfx_line16(struct gfx_canvas *c, int x0, int y0, int x1, int y1,
+		int width16, u32 color, unsigned int alpha)
+{
+	int half = width16 / 2;
+	int minx = (min(x0, x1) - half) / 16 - 1, maxx = (max(x0, x1) + half) / 16 + 1;
+	int miny = (min(y0, y1) - half) / 16 - 1, maxy = (max(y0, y1) + half) / 16 + 1;
+	int dx = x1 - x0, dy = y1 - y0;
+	int len2 = dx * dx + dy * dy;
+	int px, py;
+
+	if (minx < c->clip_x0)
+		minx = c->clip_x0;
+	if (miny < c->clip_y0)
+		miny = c->clip_y0;
+	if (maxx >= c->clip_x1)
+		maxx = c->clip_x1 - 1;
+	if (maxy >= c->clip_y1)
+		maxy = c->clip_y1 - 1;
+	for (py = miny; py <= maxy; py++) {
+		for (px = minx; px <= maxx; px++) {
+			int ox = px * 16 + 8 - x0, oy = py * 16 + 8 - y0;
+			int t = 0, ex, ey, d, cv;
+
+			if (len2) {
+				t = (ox * dx + oy * dy) / ((len2 >> 8) ? (len2 >> 8) : 1);
+				if (t < 0)
+					t = 0;
+				if (t > 256)
+					t = 256;
+			}
+			/* the closest point on the segment, t in 1/256 */
+			ex = ox - dx * t / 256;
+			ey = oy - dy * t / 256;
+			d = (int)gfx_isqrt((u32)(ex * ex + ey * ey));
+			cv = half + 8 - d;
+			if (cv <= 0)
+				continue;
+			if (cv > 16)
+				cv = 16;
+			gfx_plot(c, px, py, color, (unsigned int)cv * alpha / 16);
+		}
+	}
+}

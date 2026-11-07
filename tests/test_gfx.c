@@ -4,6 +4,7 @@
 #include <string.h>
 #include <hix/kernel.h>
 #include <steel/pixdev.h>
+#include <steel/theme.h>
 
 #define W 1024
 #define H 768
@@ -135,18 +136,19 @@ static void test_pixdev(void)
 	row[3] = STEEL_CELL(0xB1, STEEL_ATTR(STEEL_WHITE, STEEL_BLACK));
 	pixdev_present(&d, screen);
 
-	CHECK(at(ox + 3, oy + 1) == 0x000080);		/* blue background of 'A' */
-	CHECK(at(ox + 12 + 5, oy + 10) == 0x800000);	/* full block in red */
-	CHECK(at(ox + 24 + 1, oy + 14) == 0x000000);	/* a horizontal line... */
-	CHECK(at(ox + 24 + 1, oy + 5) == 0xC0C0C0);	/* ...only in the middle */
-	CHECK(at(ox + 36 + 5, oy + 10) == 0x808080);	/* medium shade, white on black */
-	CHECK(at(5, 5) == 0x008080);			/* the border is desktop teal */
+	CHECK(at(ox + 3, oy + 1) == pixdev_color(STEEL_BLUE));	/* blue background of 'A' */
+	CHECK(at(ox + 12 + 5, oy + 10) == pixdev_color(STEEL_RED));	/* full block in red */
+	CHECK(at(ox + 24 + 1, oy + 14) == pixdev_color(STEEL_BLACK));	/* a horizontal line... */
+	CHECK(at(ox + 24 + 1, oy + 5) == pixdev_color(STEEL_LGRAY));	/* ...only in the middle */
+	CHECK(at(ox + 36 + 5, oy + 10) == gfx_mix(pixdev_color(STEEL_BLACK),
+							      pixdev_color(STEEL_WHITE), 128));
+	CHECK(at(5, 5) != 0 && at(5, 5) != at(900, 700));	/* the border is wallpaper */
 	{
 		int lit = 0, x, y;
 
 		for (y = 0; y < PIX_CELL_H; y++)
 			for (x = 0; x < PIX_CELL_W; x++)
-				lit += at(ox + x, oy + y) != 0x000080;
+				lit += at(ox + x, oy + y) != pixdev_color(STEEL_BLUE);
 		CHECK(lit > 20);			/* the glyph is drawn */
 	}
 
@@ -160,7 +162,7 @@ static void test_pixdev(void)
 	/* a changed cell is */
 	screen[5] = STEEL_CELL('Z', STEEL_ATTR(STEEL_WHITE, STEEL_RED));
 	pixdev_present(&d, screen);
-	CHECK(at(ox + 5 * 12 + 1, oy + 1) == 0x800000);
+	CHECK(at(ox + 5 * 12 + 1, oy + 1) == pixdev_color(STEEL_RED));
 
 	/* the pointer is restored when it moves away */
 	memcpy(snapshot, fbmem, sizeof(snapshot));
@@ -218,6 +220,84 @@ static void test_pixdev(void)
 	CHECK(pixdev_client_set(&d, 0, 0, 0, 0, 10, clientpx, 10) == -EINVAL);
 }
 
+static steel_cell_t grid[PIX_COLS * PIX_ROWS];
+
+static void test_line(void)
+{
+	printf("-- anti-aliased line\n");
+	gfx_canvas_init(&fb, W, H, fbmem);
+	gfx_fill(&fb, 0, 0, W, H, 0x000000);
+	/* a horizontal line, 4 px thick, from x=20 to x=60 at y=50 */
+	gfx_line16(&fb, 20 * 16, 50 * 16, 60 * 16, 50 * 16, 4 * 16, 0xFFFFFF, 255);
+	CHECK(at(40, 49) == 0xFFFFFF && at(40, 50) == 0xFFFFFF);
+	CHECK(at(40, 46) == 0 && at(40, 54) == 0);
+	CHECK(at(10, 50) == 0 && at(70, 50) == 0);
+	/* a degenerate line is a dot, and drawing off the canvas is safe */
+	gfx_line16(&fb, 300 * 16, 300 * 16, 300 * 16, 300 * 16, 6 * 16, 0xFFFFFF, 255);
+	CHECK(at(300, 300) != 0);
+	gfx_line16(&fb, -500 * 16, -500 * 16, W * 16 + 500, H * 16 + 500, 3 * 16, 0xFF0000, 255);
+}
+
+static void test_theme(void)
+{
+	struct pixdev d;
+	int i;
+	u32 plain, shadowed, stripe_a, stripe_b;
+
+	printf("-- the Argent theme\n");
+	gfx_canvas_init(&fb, W, H, fbmem);
+	pixdev_init(&d, &fb);
+	for (i = 0; i < PIX_COLS * PIX_ROWS; i++)
+		grid[i] = STEEL_CELL(' ', THEME_DESKTOP_ATTR);
+
+	/* bare desktop is wallpaper: a gradient, not a flat colour */
+	pixdev_present(&d, grid);
+	CHECK(at(d.off_x + 5, d.off_y + 5) != at(d.off_x + 900, d.off_y + 600));
+	plain = at(d.off_x + 3 * PIX_CELL_W + 5, d.off_y + 3 * PIX_CELL_H + 14);
+
+	/* a shadow darkens what lies under it */
+	grid[3 * PIX_COLS + 3] = STEEL_RCELL(TR_NONE | TR_SHADOW_R, 0, ' ', THEME_DESKTOP_ATTR);
+	pixdev_present(&d, grid);
+	shadowed = at(d.off_x + 3 * PIX_CELL_W + 1, d.off_y + 3 * PIX_CELL_H + 14);
+	CHECK(GFX_G(shadowed) < GFX_G(plain));
+
+	/* an active title bar is pinstriped: neighbouring rows alternate */
+	for (i = 0; i < 10; i++)
+		grid[8 * PIX_COLS + 10 + i] = STEEL_RCELL(TR_TITLE, TP_BAR | TA_ACTIVE, ' ', 0);
+	pixdev_present(&d, grid);
+	stripe_a = at(d.off_x + 12 * PIX_CELL_W + 6, d.off_y + 8 * PIX_CELL_H + 5);
+	stripe_b = at(d.off_x + 12 * PIX_CELL_W + 6, d.off_y + 8 * PIX_CELL_H + 6);
+	CHECK(stripe_a != stripe_b);
+	/* an inactive one is flat */
+	for (i = 0; i < 10; i++)
+		grid[8 * PIX_COLS + 10 + i] = STEEL_RCELL(TR_TITLE, TP_BAR, ' ', 0);
+	pixdev_present(&d, grid);
+	CHECK(at(d.off_x + 12 * PIX_CELL_W + 6, d.off_y + 8 * PIX_CELL_H + 5) ==
+	      at(d.off_x + 12 * PIX_CELL_W + 6, d.off_y + 8 * PIX_CELL_H + 6));
+
+	/* a button draws its label centred over its cells, in more than one cell */
+	for (i = 0; i < 8; i++)
+		grid[12 * PIX_COLS + 20 + i] = STEEL_RCELL(TR_BUTTON,
+			i == 0 ? BP_LEFT : i == 7 ? BP_RIGHT : BP_BODY,
+			i >= 2 && i <= 5 ? "  OK  "[i - 1] : ' ', 0);
+	pixdev_present(&d, grid);
+	{
+		int dark = 0, x, y;
+
+		for (y = 0; y < PIX_CELL_H; y++)
+			for (x = 0; x < 8 * PIX_CELL_W; x++)
+				if (GFX_R(at(d.off_x + 20 * PIX_CELL_W + x,
+					     d.off_y + 12 * PIX_CELL_H + y)) < 140)
+					dark++;
+		CHECK(dark > 20);
+	}
+
+	/* a role must not disturb the text display: only the low 16 bits count */
+	CHECK(STEEL_TEXT(STEEL_RCELL(TR_TITLE, 0x31, 'x', 0x1F)) == STEEL_CELL('x', 0x1F));
+	CHECK(STEEL_ROLE(STEEL_RCELL(TR_FRAME, 5, 'x', 0x1F)) == TR_FRAME);
+	CHECK(STEEL_AUX(STEEL_RCELL(TR_FRAME, 5, 'x', 0x1F)) == 5);
+}
+
 int main(void)
 {
 	printf("test_gfx\n");
@@ -225,5 +305,7 @@ int main(void)
 	test_shapes();
 	test_text();
 	test_pixdev();
+	test_line();
+	test_theme();
 	TEST_DONE();
 }

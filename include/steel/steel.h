@@ -11,8 +11,11 @@
  *                   layers into a final surface and presents it
  *   steel_console   the text terminal printk and the tty write to
  *
- * A cell is 16 bit: character in the low byte, colour attribute in the high
- * byte (VGA text mode layout, code page 437 glyphs).
+ * A cell is 32 bit. The low 16 bits are the VGA text mode layout: character
+ * in the low byte, colour attribute in the high byte (code page 437 glyphs).
+ * The upper 16 bits are the cell's "role" and a role-specific value: text
+ * displays ignore them, the pixel display (steel/theme.cpp) draws a cell with
+ * a role as a piece of the desktop theme instead of as a character.
  */
 #ifndef _STEEL_STEEL_H
 #define _STEEL_STEEL_H
@@ -20,7 +23,7 @@
 #include <hix/types.h>
 #include <hix/list.h>
 
-typedef u16 steel_cell_t;
+typedef u32 steel_cell_t;
 
 enum steel_color {
 	STEEL_BLACK, STEEL_BLUE, STEEL_GREEN, STEEL_CYAN,
@@ -30,9 +33,17 @@ enum steel_color {
 };
 
 #define STEEL_ATTR(fg, bg)	((u8)(((bg) << 4) | (fg)))
-#define STEEL_CELL(ch, attr)	((steel_cell_t)(((attr) << 8) | (u8)(ch)))
+#define STEEL_CELL(ch, attr)	((steel_cell_t)(((u32)(u8)(attr) << 8) | (u8)(ch)))
 #define STEEL_CH(cell)		((u8)((cell) & 0xFF))
-#define STEEL_AT(cell)		((u8)((cell) >> 8))
+#define STEEL_AT(cell)		((u8)(((cell) >> 8) & 0xFF))
+#define STEEL_ROLE(cell)	((u8)(((cell) >> 16) & 0xFF))
+#define STEEL_AUX(cell)		((u8)(((cell) >> 24) & 0xFF))
+/* a cell that is a piece of the theme: @role, @aux, and ch/attr as fallback */
+#define STEEL_RCELL(role, aux, ch, attr) \
+	((steel_cell_t)(STEEL_CELL(ch, attr) | ((u32)(u8)(role) << 16) | \
+			((u32)(u8)(aux) << 24)))
+/* the part a text display understands */
+#define STEEL_TEXT(cell)	((u16)((cell) & 0xFFFF))
 
 /* code page 437 pieces used for drawing */
 #define STEEL_SHADE_LIGHT	0xB0
@@ -72,6 +83,14 @@ void steel_box(struct steel_surface *s, int x, int y, int w, int h,
 	       enum steel_box_style style, u8 attr);
 void steel_blit(struct steel_surface *dst, int dx, int dy,
 		const struct steel_surface *src, int sx, int sy, int w, int h);
+/* give every cell of a rectangle a theme role (keeps ch and attr) */
+void steel_tag(struct steel_surface *s, int x, int y, int w, int h, u8 role,
+	       u8 aux);
+/* OR shadow flags (TR_SHADOW_*, steel/theme.h) into the role of each cell */
+void steel_shade(struct steel_surface *s, int x, int y, int w, int h, u8 flags);
+/* a cell with a role, ch and attr being its text-mode look */
+void steel_put_role(struct steel_surface *s, int x, int y, u8 role, u8 aux,
+		    u8 ch, u8 attr);
 /* recolour a rectangle without touching the characters */
 void steel_tint(struct steel_surface *s, int x, int y, int w, int h, u8 attr);
 

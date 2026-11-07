@@ -11,4 +11,8 @@ u32 *bga_enable(int w, int h);
 /* back to the VGA text mode */
 void bga_disable(void);
 
+/* text mode support in drivers/vga.c, used around a pixel mode */
+void vga_font_save(void);
+void vga_text_restore(void);
+
 #endif /* _STEEL_BGA_H */

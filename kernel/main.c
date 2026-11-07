@@ -47,6 +47,7 @@ void hix_start(u32 magic, const struct multiboot_info *mbi)
 	pmm_init(mbi);
 	vm_init();
 	kalloc_init();
+	cxx_init();			/* global C++ objects, if any */
 
 	/* aether: tasks, scheduler, ports */
 	task_init();

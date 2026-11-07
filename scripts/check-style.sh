@@ -10,7 +10,7 @@
 
 cd "$(dirname "$0")/.." || exit 1
 files=$(find arch aether qubix steel apps drivers kernel lib include tests \
-	-name '*.c' -o -name '*.h' -o -name '*.asm' | grep -v "/build/\|gfx_data.c" | sort)
+	-name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.asm' | grep -v "/build/\|gfx_data.c\|icon_data.c" | sort)
 out=$(mktemp)
 trap 'rm -f "$out"' EXIT
 

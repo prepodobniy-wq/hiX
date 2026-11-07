@@ -11,6 +11,9 @@
 #define _DESK_CHESS_H
 
 #include <hix/types.h>
+#include <hix/linkage.h>
+
+HIX_BEGIN_C
 
 enum { CH_NONE, CH_PAWN, CH_KNIGHT, CH_BISHOP, CH_ROOK, CH_QUEEN, CH_KING };
 #define CH_BLACK	8
@@ -39,7 +42,7 @@ struct chess_move {
 #define CH_MAX_MOVES	256
 #define CH_MAX_HIST	1024
 
-struct chess_undo {
+struct chess_hist {
 	struct chess_move m;
 	u8 captured;
 	u8 castle;
@@ -56,7 +59,7 @@ struct chess {
 	int halfmove;		/* plies since a capture or pawn move */
 	int fullmove;
 	int nhist;
-	struct chess_undo hist[CH_MAX_HIST];
+	struct chess_hist hist[CH_MAX_HIST];
 	u32 hash;
 };
 
@@ -92,5 +95,7 @@ bool chess_best(struct chess *g, int depth, unsigned long max_nodes, int noise,
 		struct chess_move *out);
 void chess_seed(u32 seed);
 unsigned long chess_perft(struct chess *g, int depth);
+
+HIX_END_C
 
 #endif /* _DESK_CHESS_H */

@@ -13,6 +13,7 @@
 #include <hix/kernel.h>
 #include <hix/version.h>
 #include <desk/desk.h>
+#include <steel/theme.h>
 #include <steel/pixdev.h>
 
 #define BORDER_SLOTS	2		/* windows kept free for dialogs */
@@ -348,6 +349,8 @@ void desk_set_client_size(struct win *w, int cw, int ch)
 	w->client.h = w->ch;
 	if (w->state == WS_MAX)
 		w->state = WS_NORMAL;
+	if (w->pix_idx >= 0)
+		px_ox[w->pix_idx] = -1;	/* the pixel client is registered again */
 	clamp_position(w);
 }
 
@@ -380,11 +383,17 @@ void desk_draw_button(struct steel_surface *s, int x, int y, const char *label,
 {
 	u8 attr = focused ? A_SEL : A_WIN;
 	int len = (int)strlen(label);
+	u8 flags = (focused ? BA_DEFAULT : 0) |
+		   (((STEEL_AT(steel_get(s, x, y)) >> 4) == STEEL_LGRAY) ? BA_ON_GRAY : 0);
 
 	steel_rect(s, x, y, len + 4, 1, ' ', attr);
 	steel_put(s, x, y, '[', attr);
 	steel_puts(s, x + 2, y, label, attr);
 	steel_put(s, x + len + 3, y, ']', attr);
+	/* the pixel theme draws the whole thing as one rounded button */
+	steel_tag(s, x, y, len + 4, 1, TR_BUTTON, BP_BODY | flags);
+	steel_tag(s, x, y, 1, 1, TR_BUTTON, BP_LEFT | flags);
+	steel_tag(s, x + len + 3, y, 1, 1, TR_BUTTON, BP_RIGHT | flags);
 }
 
 /* a "sunken" panel: dark gray frame inside a white field */
@@ -400,13 +409,25 @@ void desk_draw_icon(struct steel_surface *s, int x, int y, int cell_w,
 		    const struct app *app, bool selected)
 {
 	char label[16];
-	int len, i;
+	int len, i, c;
 	u8 lattr = selected ? A_SEL : A_WIN;
+	int id = theme_icon_id(app->name);
 
 	for (i = 0; i < 2; i++) {
 		int gx = x + (cell_w - 6) / 2;
 
 		steel_puts(s, gx, y + i, app->icon[i], app->icon_attr[i]);
+	}
+	/* the pixel theme replaces the character picture by a 48x48 icon */
+	for (i = 0; i < TI_CELLS_H; i++) {
+		for (c = 0; c < cell_w; c++) {
+			int rel = c - (cell_w - TI_CELLS_W) / 2;
+
+			/* cells beside the picture are empty ones (column 7) */
+			steel_put_role(s, x + c, y + i, TR_ICON, (u8)id,
+				       (u8)(((rel >= 0 && rel < TI_CELLS_W ? rel : 7) << 4) | i),
+				       A_WIN);
+		}
 	}
 	strlcpy(label, app->title, sizeof(label));
 	len = (int)strlen(label);
@@ -415,6 +436,9 @@ void desk_draw_icon(struct steel_surface *s, int x, int y, int cell_w,
 	label[len] = '\0';
 	steel_rect(s, x, y + 2, cell_w, 1, ' ', A_WIN);
 	steel_puts(s, x + (cell_w - len) / 2, y + 2, label, lattr);
+	for (i = 0; i < cell_w; i++)
+		steel_tag(s, x + i, y + 2, 1, 1, TR_LABEL,
+			  (u8)((selected ? TL_SELECTED : 0) | TL_INDEX(i)));
 }
 
 /* ---- menus ----------------------------------------------------------- */
@@ -674,6 +698,14 @@ static void draw_menu_bar(const struct win *w, int x, int y, int fw)
 		steel_puts(&screen, tx, y, t, attr);
 		steel_put(&screen, tx + (int)strlen(t), y, ' ', attr);
 	}
+	/* theme: the row is a menu bar, the open title is highlighted */
+	steel_tag(&screen, x + 1, y, fw - 2, 1, TR_MENUBAR, 0);
+	for (i = 0; i < w->app->nmenus; i++) {
+		if (mn.active && mn.win_id == w->id && mn.menu == i)
+			steel_tag(&screen, menu_title_x(w, i) - 1, y,
+				  (int)strlen(w->app->menus[i].title) + 2,
+				  1, TR_MENUBAR, MB_SELECTED);
+	}
 }
 
 static void draw_frame(const struct win *w, bool active)
@@ -717,6 +749,43 @@ static void draw_frame(const struct win *w, bool active)
 
 	if (menu_rows(w))
 		draw_menu_bar(w, x, y + 1, fw);
+
+	/* theme roles: title bar, borders, window controls */
+	{
+		u8 act = active ? TA_ACTIVE : 0;
+		int i;
+
+		steel_tag(&screen, x, y, fw, 1, TR_TITLE, TP_BAR | act);
+		steel_tag(&screen, x, y, 1, 1, TR_TITLE, TP_BAR | act | TA_FIRST);
+		steel_tag(&screen, x + fw - 1, y, 1, 1, TR_TITLE,
+			  TP_BAR | act | TA_LAST);
+		steel_tag(&screen, x + 1, y, 1, 1, TR_TITLE, TP_CLOSE | act);
+		if (!dialog) {
+			int bx2 = x + fw - 4;
+
+			steel_tag(&screen, bx2 + 1, y, 1, 1, TR_TITLE, TP_COLLAPSE | act);
+			if (resizable)
+				steel_tag(&screen, bx2 - 2, y, 1, 1, TR_TITLE,
+					  TP_ZOOM | act);
+		}
+		if (len > 0) {
+			int t0 = max(tx - 1, x + 3), t1 = min(tx + len, x + 3 + room);
+
+			for (i = t0; i <= t1; i++)
+				steel_tag(&screen, i, y, 1, 1, TR_TITLE, TP_TEXT | act);
+		}
+		steel_tag(&screen, x, y + 1, 1, fh - 2, TR_FRAME, FS_L | (active ? FA_ACTIVE : 0));
+		steel_tag(&screen, x + fw - 1, y + 1, 1, fh - 2, TR_FRAME,
+			  FS_R | (active ? FA_ACTIVE : 0));
+		steel_tag(&screen, x, y + fh - 1, fw, 1, TR_FRAME, FS_B | (active ? FA_ACTIVE : 0));
+		steel_tag(&screen, x, y + fh - 1, 1, 1, TR_FRAME,
+			  FS_B | FS_L | (active ? FA_ACTIVE : 0));
+		steel_tag(&screen, x + fw - 1, y + fh - 1, 1, 1, TR_FRAME,
+			  FS_B | FS_R | (active ? FA_ACTIVE : 0));
+		/* the window's shadow falls to the right and below */
+		steel_shade(&screen, x + fw, y + 1, 1, fh, TR_SHADOW_R);
+		steel_shade(&screen, x + 1, y + fh, fw, 1, TR_SHADOW_B);
+	}
 }
 
 static void draw_dropdown(const struct win *w)
@@ -742,7 +811,26 @@ static void draw_dropdown(const struct win *w)
 		if (it->accel)
 			steel_puts(&screen, dx + dw - 2 - (int)strlen(it->accel),
 				   row, it->accel, attr);
+		steel_tag(&screen, dx + 1, row, dw - 2, 1, TR_DROP,
+			  i == mn.item ? DP_SELECTED : (usable ? DP_ITEM : DP_DISABLED));
 	}
+	/* theme: thin outline and a shadow */
+	steel_tag(&screen, dx, dy, dw, dh, TR_FRAME, FA_FLAT);
+	steel_tag(&screen, dx, dy, dw, 1, TR_FRAME, FA_FLAT | FS_T);
+	steel_tag(&screen, dx, dy + dh - 1, dw, 1, TR_FRAME, FA_FLAT | FS_B);
+	steel_tag(&screen, dx, dy, 1, dh, TR_FRAME, FA_FLAT | FS_L);
+	steel_tag(&screen, dx + dw - 1, dy, 1, dh, TR_FRAME, FA_FLAT | FS_R);
+	steel_tag(&screen, dx, dy, 1, 1, TR_FRAME, FA_FLAT | FS_T | FS_L);
+	steel_tag(&screen, dx + dw - 1, dy, 1, 1, TR_FRAME, FA_FLAT | FS_T | FS_R);
+	steel_tag(&screen, dx, dy + dh - 1, 1, 1, TR_FRAME, FA_FLAT | FS_B | FS_L);
+	steel_tag(&screen, dx + dw - 1, dy + dh - 1, 1, 1, TR_FRAME,
+		  FA_FLAT | FS_B | FS_R);
+	for (i = 0; i < m->nitems; i++)
+		if (!m->items[i].id)
+			steel_tag(&screen, dx + 1, dy + 1 + i, dw - 2, 1, TR_DROP,
+				  DP_SEPARATOR);
+	steel_shade(&screen, dx + dw, dy + 1, 1, dh, TR_SHADOW_R);
+	steel_shade(&screen, dx + 1, dy + dh, dw, 1, TR_SHADOW_B);
 }
 
 static void minimized_origin(const struct win *w, int *ix, int *iy)
@@ -765,6 +853,24 @@ static void draw_minimized(const struct win *w)
 	char label[16];
 
 	minimized_origin(w, &ix, &iy);
+	if (pixel_mode) {
+		int id = theme_icon_id(w->app->name), c;
+
+		steel_rect(&screen, ix, iy, ICON_SLOT_W - 2, ICON_ROWS, ' ', A_DESKTOP);
+		for (i = 0; i < TI_CELLS_H; i++)
+			for (c = 0; c < TI_CELLS_W; c++)
+				steel_put_role(&screen, ix + (ICON_SLOT_W - 2 - TI_CELLS_W) / 2 + c,
+					       iy + i, TR_ICON, (u8)id,
+					       (u8)((c << 4) | i | TI_DESKTOP), A_DESKTOP);
+		strlcpy(label, w->title, sizeof(label));
+		label[ICON_SLOT_W - 2] = '\0';
+		steel_puts(&screen, ix + (ICON_SLOT_W - 2 - (int)strlen(label)) / 2,
+			   iy + 2, label, A_DESKTOP);
+		for (i = 0; i < ICON_SLOT_W - 2; i++)
+			steel_tag(&screen, ix + i, iy + 2, 1, 1, TR_LABEL,
+				  (u8)(TL_ON_DESKTOP | TL_INDEX(i)));
+		return;
+	}
 	steel_rect(&screen, ix, iy, ICON_SLOT_W - 2, ICON_ROWS, ' ', A_WIN);
 	for (i = 0; i < 2; i++)
 		steel_puts(&screen, ix + 3, iy + i, w->app->icon[i],

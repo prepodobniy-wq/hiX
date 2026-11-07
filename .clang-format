@@ -1,0 +1,16 @@
+# Based on the Linux kernel's .clang-format (subset).
+BasedOnStyle: LLVM
+IndentWidth: 8
+UseTab: Always
+TabWidth: 8
+ContinuationIndentWidth: 8
+BreakBeforeBraces: Linux
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+IndentCaseLabels: false
+ColumnLimit: 80
+SpaceBeforeParens: ControlStatements
+AlignAfterOpenBracket: Align
+PointerAlignment: Right
+SortIncludes: false

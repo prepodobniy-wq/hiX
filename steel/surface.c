@@ -154,3 +154,37 @@ void steel_tint(struct steel_surface *s, int x, int y, int w, int h, u8 attr)
 		}
 	}
 }
+
+void steel_tag(struct steel_surface *s, int x, int y, int w, int h, u8 role,
+	       u8 aux)
+{
+	int ix, iy;
+
+	for (iy = y; iy < y + h; iy++) {
+		for (ix = x; ix < x + w; ix++) {
+			if (inside(s, ix, iy)) {
+				steel_cell_t *c = &s->cells[iy * s->w + ix];
+
+				*c = STEEL_RCELL(role, aux, STEEL_CH(*c),
+						 STEEL_AT(*c));
+			}
+		}
+	}
+}
+
+void steel_shade(struct steel_surface *s, int x, int y, int w, int h, u8 flags)
+{
+	int ix, iy;
+
+	for (iy = y; iy < y + h; iy++)
+		for (ix = x; ix < x + w; ix++)
+			if (inside(s, ix, iy))
+				s->cells[iy * s->w + ix] |= (steel_cell_t)flags << 16;
+}
+
+void steel_put_role(struct steel_surface *s, int x, int y, u8 role, u8 aux,
+		    u8 ch, u8 attr)
+{
+	if (inside(s, x, y))
+		s->cells[y * s->w + x] = STEEL_RCELL(role, aux, ch, attr);
+}

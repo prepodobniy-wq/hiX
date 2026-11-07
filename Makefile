@@ -8,6 +8,7 @@
 #   make run-serial   like run, with the serial console on your terminal
 #   make test         host-side unit tests (pmm, heap, ipc, vfs, steel, ...)
 #   make check        style check + Multiboot header check
+#   make shots        render the desktop (host test frames) to PNG in build/shots
 #   make strict       build with -Werror
 #   make help         this list
 #
@@ -15,6 +16,7 @@
 
 CROSS_COMPILE ?=
 CC	:= $(CROSS_COMPILE)gcc
+CXX	:= $(CROSS_COMPILE)g++
 LD	:= $(CROSS_COMPILE)ld
 NASM	:= nasm
 QEMU	?= qemu-system-i386
@@ -43,6 +45,17 @@ CFLAGS	:= -m32 -march=i686 -std=gnu11 -O2 -g \
 	   -mno-sse -mno-mmx -mno-sse2 -mno-80387 -mno-red-zone \
 	   $(WARN) -Iinclude -MMD -MP
 
+# C++ is for the layers above the kernel proper (hix itself stays C): no
+# exceptions, no RTTI, no standard library, so it needs nothing but lib/cxxrt.c
+CXXFLAGS := -m32 -march=i686 -std=gnu++17 -O2 -g \
+	   -ffreestanding -fno-builtin -nostdinc++ \
+	   -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit \
+	   -fno-stack-protector -fno-pic -fno-pie -fcf-protection=none \
+	   -fno-asynchronous-unwind-tables -fno-omit-frame-pointer \
+	   -fno-tree-loop-distribute-patterns \
+	   -mno-sse -mno-mmx -mno-sse2 -mno-80387 -mno-red-zone \
+	   $(WARN) -Iinclude -MMD -MP
+
 NASMFLAGS := -f elf32 -g -F dwarf
 
 LDFLAGS	:= -m elf_i386 -T linker.ld -nostdlib -z noexecstack \
@@ -53,13 +66,15 @@ LDFLAGS	:= -m elf_i386 -T linker.ld -nostdlib -z noexecstack \
 
 C_SRCS	:= $(wildcard arch/x86/*.c kernel/*.c aether/*.c qubix/*.c \
 		      steel/*.c drivers/*.c lib/*.c apps/*.c)
+CXX_SRCS := $(wildcard apps/*.cpp lib/*.cpp steel/*.cpp qubix/*.cpp)
 ASM_SRCS := $(wildcard arch/x86/*.asm)
-OBJS	:= $(addprefix $(BUILD)/,$(C_SRCS:.c=.o) $(ASM_SRCS:.asm=.asm.o))
+OBJS	:= $(addprefix $(BUILD)/,$(C_SRCS:.c=.o) $(CXX_SRCS:.cpp=.o) \
+			 $(ASM_SRCS:.asm=.asm.o))
 DEPS	:= $(OBJS:.o=.d)
 
 # --- targets ------------------------------------------------------------
 
-.PHONY: all kernel iso run run-iso run-serial debug test check strict \
+.PHONY: all kernel iso run run-iso run-serial debug test check strict shots \
 	clean distclean help
 .DEFAULT_GOAL := all
 
@@ -82,6 +97,11 @@ $(BUILD)/%.o: %.c
 	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
 	$(Q)$(CC) $(CFLAGS) -DHIX_VERSION=\"$(VERSION)\" -c $< -o $@
+
+$(BUILD)/%.o: %.cpp
+	@echo "  CXX     $<"
+	@mkdir -p $(dir $@)
+	$(Q)$(CXX) $(CXXFLAGS) -DHIX_VERSION=\"$(VERSION)\" -c $< -o $@
 
 $(BUILD)/%.asm.o: %.asm
 	@echo "  NASM    $<"
@@ -118,6 +138,9 @@ strict:
 
 test:
 	$(MAKE) -C tests run
+
+shots:
+	@python3 scripts/shots.py
 
 check: kernel
 	@scripts/check-style.sh

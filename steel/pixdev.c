@@ -2,16 +2,18 @@
 /* steel pixdev: draw the cell surface with smooth glyphs, see pixdev.h. */
 #include <hix/kernel.h>
 #include <steel/pixdev.h>
+#include <steel/theme.h>
 
+/* the Argent palette: the 16 attribute colours, softened */
 static const u32 palette[16] = {
-	GFX_RGB(0x00, 0x00, 0x00), GFX_RGB(0x00, 0x00, 0x80),
-	GFX_RGB(0x00, 0x80, 0x00), GFX_RGB(0x00, 0x80, 0x80),
-	GFX_RGB(0x80, 0x00, 0x00), GFX_RGB(0x80, 0x00, 0x80),
-	GFX_RGB(0x80, 0x80, 0x00), GFX_RGB(0xC0, 0xC0, 0xC0),
-	GFX_RGB(0x80, 0x80, 0x80), GFX_RGB(0x00, 0x00, 0xFF),
-	GFX_RGB(0x00, 0xFF, 0x00), GFX_RGB(0x00, 0xFF, 0xFF),
-	GFX_RGB(0xFF, 0x00, 0x00), GFX_RGB(0xFF, 0x00, 0xFF),
-	GFX_RGB(0xFF, 0xFF, 0x00), GFX_RGB(0xFF, 0xFF, 0xFF),
+	GFX_RGB(0x1C, 0x1C, 0x20), GFX_RGB(0x2F, 0x5D, 0xA8),
+	GFX_RGB(0x2E, 0x8B, 0x57), GFX_RGB(0x2B, 0x7A, 0x8C),
+	GFX_RGB(0xC0, 0x39, 0x2B), GFX_RGB(0x8E, 0x44, 0xAD),
+	GFX_RGB(0xB7, 0x79, 0x1F), GFX_RGB(0xDC, 0xDC, 0xDC),
+	GFX_RGB(0x7A, 0x7A, 0x7A), GFX_RGB(0x5B, 0x9B, 0xEF),
+	GFX_RGB(0x5C, 0xBF, 0x6A), GFX_RGB(0x5C, 0xC8, 0xD8),
+	GFX_RGB(0xEF, 0x6B, 0x5B), GFX_RGB(0xC7, 0x7D, 0xDB),
+	GFX_RGB(0xF2, 0xC9, 0x4C), GFX_RGB(0xFF, 0xFF, 0xFF),
 };
 
 u32 pixdev_color(int idx)
@@ -139,13 +141,36 @@ static void draw_box(struct pixdev *d, int x, int y, u32 fg, int ch)
 	}
 }
 
-static void draw_cell(struct pixdev *d, int cx, int cy, steel_cell_t cell)
+static void draw_base(struct pixdev *d, int cx, int cy, steel_cell_t cell,
+		      const steel_cell_t *cells);
+
+static void draw_cell(struct pixdev *d, int cx, int cy, steel_cell_t cell,
+		      const steel_cell_t *cells)
+{
+	unsigned int shadow = STEEL_ROLE(cell) & (TR_SHADOW_R | TR_SHADOW_B);
+	int x = d->off_x + cx * PIX_CELL_W, y = d->off_y + cy * PIX_CELL_H;
+
+	draw_base(d, cx, cy, cell, cells);
+	if (shadow)
+		theme_shadow(&d->fb, x, y, shadow);
+}
+
+static void draw_base(struct pixdev *d, int cx, int cy, steel_cell_t cell,
+		      const steel_cell_t *cells)
 {
 	int x = d->off_x + cx * PIX_CELL_W, y = d->off_y + cy * PIX_CELL_H;
 	u32 fg = palette[STEEL_AT(cell) & 15];
 	u32 bg = palette[(STEEL_AT(cell) >> 4) & 15];
 	int ch = STEEL_CH(cell);
 
+	if (TR_ID(STEEL_ROLE(cell))) {
+		theme_draw_cell(&d->fb, x, y, cx, cy, cells, PIX_COLS, PIX_ROWS);
+		return;
+	}
+	if (theme_is_wallpaper(cell)) {
+		theme_wallpaper(&d->fb, x, y, PIX_CELL_W, PIX_CELL_H);
+		return;
+	}
 	if (STEEL_IS_HOLE(cell)) {
 		const struct pix_client *c = &d->client[STEEL_AT(cell) - 0xA0];
 		struct gfx_canvas src;
@@ -195,7 +220,7 @@ void pixdev_init(struct pixdev *d, const struct gfx_canvas *fb)
 	gfx_clip_reset(&d->fb);
 	d->off_x = pixdev_off_x(fb);
 	d->off_y = pixdev_off_y(fb);
-	gfx_fill(&d->fb, 0, 0, fb->w, fb->h, palette[3]);
+	theme_wallpaper(&d->fb, 0, 0, fb->w, fb->h);
 }
 
 int pixdev_client_set(struct pixdev *d, int idx, int x, int y, int w, int h,
@@ -261,6 +286,7 @@ static bool client_dirty_at(const struct pixdev *d, steel_cell_t cell, int px,
 
 void pixdev_present(struct pixdev *d, const steel_cell_t *cells)
 {
+	static bool dirty[PIX_COLS * PIX_ROWS];
 	int cx, cy, i;
 
 	cursor_restore(d);
@@ -271,12 +297,35 @@ void pixdev_present(struct pixdev *d, const steel_cell_t *cells)
 			int px = d->off_x + cx * PIX_CELL_W;
 			int py = d->off_y + cy * PIX_CELL_H;
 
-			if (d->have_prev && d->prev[n] == cell &&
-			    !(STEEL_IS_HOLE(cell) &&
-			      client_dirty_at(d, cell, px, py)))
+			dirty[n] = !d->have_prev || d->prev[n] != cell ||
+				   (STEEL_IS_HOLE(cell) &&
+				    client_dirty_at(d, cell, px, py));
+		}
+		/* a text run (title, button, label) is redrawn as a whole */
+		for (cx = 0; cx < PIX_COLS; cx++) {
+			unsigned int key = theme_run_key(cells[cy * PIX_COLS + cx]);
+			int end = cx;
+			bool any = false;
+
+			if (!key)
 				continue;
-			draw_cell(d, cx, cy, cell);
-			d->prev[n] = cell;
+			while (end < PIX_COLS &&
+			       theme_run_key(cells[cy * PIX_COLS + end]) == key) {
+				any |= dirty[cy * PIX_COLS + end];
+				end++;
+			}
+			if (any)
+				for (i = cx; i < end; i++)
+					dirty[cy * PIX_COLS + i] = true;
+			cx = end - 1;
+		}
+		for (cx = 0; cx < PIX_COLS; cx++) {
+			int n = cy * PIX_COLS + cx;
+
+			if (!dirty[n])
+				continue;
+			draw_cell(d, cx, cy, cells[n], cells);
+			d->prev[n] = cells[n];
 		}
 	}
 	d->have_prev = true;

@@ -43,7 +43,8 @@ def main():
     src = sys.argv[1]
     dst = sys.argv[2] if len(sys.argv) > 2 else src.rsplit(".", 1)[0] + ".png"
     data = open(src, "rb").read()
-    cells = struct.unpack("<%dH" % (COLS * ROWS), data[: COLS * ROWS * 2])
+    # cells are 32 bit since 0.3.4; the text look is the low 16 bits
+    cells = [c & 0xFFFF for c in struct.unpack("<%dI" % (COLS * ROWS), data[: COLS * ROWS * 4])]
     font = None
     for path in FONTS:
         try:

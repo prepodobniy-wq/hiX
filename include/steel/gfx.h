@@ -74,6 +74,9 @@ void gfx_disc16(struct gfx_canvas *c, int cx16, int cy16, int r16, u32 color,
 		unsigned int alpha);
 void gfx_ring16(struct gfx_canvas *c, int cx16, int cy16, int r16,
 		int thick16, u32 color, unsigned int alpha);
+/* a thick line with round ends; coordinates and width in 1/16 pixel */
+void gfx_line16(struct gfx_canvas *c, int x0, int y0, int x1, int y1,
+		int width16, u32 color, unsigned int alpha);
 /* blend @color through an 8 bit coverage mask; @alpha scales it (255 = as is) */
 void gfx_mask(struct gfx_canvas *c, int x, int y, const u8 *mask, int mw,
 	      int mh, int mstride, u32 color, unsigned int alpha);

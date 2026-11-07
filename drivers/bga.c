@@ -91,17 +91,20 @@ u32 *bga_enable(int w, int h)
 {
 	if (!found)
 		return NULL;
+	vga_font_save();		/* the framebuffer will overwrite it */
 	vbe_write(VBE_ENABLE, VBE_DISABLED);
 	vbe_write(VBE_XRES, (u16)w);
 	vbe_write(VBE_YRES, (u16)h);
 	vbe_write(VBE_BPP, 32);
 	vbe_write(VBE_VIRT_W, (u16)w);
+	vbe_write(VBE_VIRT_H, (u16)h);	/* no scrolling room: the picture is the screen */
 	vbe_write(VBE_XOFF, 0);
 	vbe_write(VBE_YOFF, 0);
 	vbe_write(VBE_ENABLE, VBE_ENABLED | VBE_LFB);
 	if (vbe_read(VBE_XRES) != w || vbe_read(VBE_YRES) != h) {
 		pr_warn("the adapter refused %dx%d\n", w, h);
 		vbe_write(VBE_ENABLE, VBE_DISABLED);
+		vga_text_restore();
 		return NULL;
 	}
 	return (u32 *)(unsigned long)fb_phys;
@@ -109,8 +112,10 @@ u32 *bga_enable(int w, int h)
 
 void bga_disable(void)
 {
-	if (found)
-		vbe_write(VBE_ENABLE, VBE_DISABLED);
+	if (!found)
+		return;
+	vbe_write(VBE_ENABLE, VBE_DISABLED);
+	vga_text_restore();		/* the pixel mode left the VGA registers changed */
 }
 
 static struct hix_driver bga_driver = {

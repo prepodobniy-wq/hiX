@@ -680,6 +680,22 @@ static u32 pixel_at(int x, int y)
 	return tmem[y * 1024 + x];
 }
 
+static void test_clock_sweep(void)
+{
+	long t;
+	int n = 0;
+
+	printf("-- clock paints at any time of day\n");
+	for (t = 0; t < 2000000000L; t += 86413L * 11 + 1357, n++) {
+		struct op ops[] = { WAIT(600), KEY('a') };
+
+		fake_time = t < 2147483647L ? t : 2147483647L;
+		RUN(ops, "clock");
+	}
+	CHECK(n > 100);
+	fake_time = 1793609070;
+}
+
 static void test_chess_ui(void)
 {
 	struct op open[] = { WAIT(100) };
@@ -783,11 +799,17 @@ int main(void)
 {
 	printf("test_desk\n");
 	shot_dir = getenv("DESK_SHOTS");
+	tpix_start();			/* the real desktop runs on the pixel display */
 	test_every_app();
+	tpix_stop();			/* the hand-drawing code is the cell one */
+	test_clock_sweep();
+	tpix_start();
 	test_chess_ui();
+	tpix_start();
 	test_boot();
 	test_launch_by_mouse();
 	test_calculator();
+	tpix_stop();
 	(void)dump_screen;
 	TEST_DONE();
 }

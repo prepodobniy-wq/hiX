@@ -34,6 +34,12 @@ SECTIONS
 	.data : ALIGN(4K)
 	{
 		*(.data .data.*)
+
+		/* constructors of global C++ objects, see lib/cxxrt.c */
+		. = ALIGN(4);
+		__init_array_start = .;
+		KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*) .init_array))
+		__init_array_end = .;
 	}
 
 	.bss : ALIGN(4K)

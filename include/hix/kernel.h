@@ -11,6 +11,9 @@
 struct pt_regs;
 
 void panic(const char *fmt, ...) __noreturn __printf(1, 2);
+
+/* lib/cxxrt.c: constructors of global C++ objects */
+void cxx_init(void);
 void panic_regs(const struct pt_regs *regs, const char *fmt, ...)
 	__noreturn __printf(2, 3);
 

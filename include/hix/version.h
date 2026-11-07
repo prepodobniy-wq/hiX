@@ -5,7 +5,7 @@
 #define HIX_NAME	"hix"
 #define HIX_CODENAME	"hi kernel"
 #define HIX_EXPAND	"hi is not unix"
-#define HIX_RELEASE	"0.3.1"
+#define HIX_RELEASE	"0.3.4"
 
 /* the four pillars, see docs/ARCHITECTURE.md */
 #define AETHER_NAME	"aether"	/* tasks, ports, scheduler */
