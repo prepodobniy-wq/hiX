@@ -1,114 +1,101 @@
+<div align="center">
+
+# HIX
+### hi is not Unix
+
+![HIX screensaver](docs/assets/hixsaver.gif)
+
+**An experimental operating system for i386**
+
+</div>
+
 # hix — hi is not unix
 
-Гибридное ядро для i386, выросшее из вашего hi-Kernel 0.1.0. Ядро разделено на
-слои со своими именами, код оформлен по Linux coding style. Версия: **0.3.4**.
+A hybrid kernel for i386, grown from your hi-Kernel 0.1.0. The kernel is divided into
+layers with their own names, and the code is styled according to the Linux coding style. Version: **0.3.1**.
 
-| Имя | Роль | Где |
+| Name | Role | Where |
 |---|---|---|
-| **hix** | всё ядро целиком: загрузка, прерывания, printk, panic, драйверы | `arch/` `kernel/` `drivers/` `lib/` |
-| **aether** | задачи, потоки, планировщик, порты и IPC, память | `aether/` |
-| **qubix** | процессы, системные вызовы, VFS, tty, шелл | `qubix/` |
-| **steel** | поверхности, холсты, композитор, консоль, пиксельный режим | `steel/` |
-| **desk** | рабочий стол и программы (процесс qubix) | `apps/` `include/desk/` |
+| **hix** | entire kernel: booting, interrupts, printk, panic, drivers | `arch/` `kernel/` `drivers/` `lib/` |
+| **aether** | tasks, threads, scheduler, ports and IPC, memory | `aether/` |
+| **qubix** | processes, system calls, VFS, tty, shell | `qubix/` |
+| **steel** | surfaces, canvases, compositor, console, pixel mode | `steel/` |
+| **desk** | desktop and programs (qubix process) | `apps/` `include/desk/` |
 
-## Сборка и запуск
+## Build and Run
 
-    make              # build/hix.elf (+ build/hix.iso, если есть grub-mkrescue)
-    make run          # QEMU напрямую, без GRUB:  qemu-system-i386 -kernel
-    make run-serial   # то же + консоль COM1 в вашем терминале
-    make run-iso      # через GRUB
-    make test         # хост-тесты (в т.ч. шахматный движок с perft)
-    make check        # стиль + проверка multiboot-заголовка
-    make strict       # сборка с -Werror
+    make              # build/hix.elf (+ build/hix.iso, if grub-mkrescue is available)
+    make run          # QEMU directly, without GRUB:  qemu-system-i386 -kernel
+    make run-serial   # same + COM1 console in your terminal
+    make run-iso      # via GRUB
+    make test         # host tests (including chess engine with perft)
+    make check        # style + multiboot header check
+    make strict       # build with -Werror
 
-Нужны: gcc и g++ (с -m32), nasm, ld; для ISO — grub-mkrescue + xorriso; для запуска — QEMU.
+Requirements: gcc (with -m32), nasm, ld; for ISO — grub-mkrescue + xorriso; for running — QEMU.
 
-## Языки
+## Graphics (steel)
 
-Ядро hix — только C. Слои над ним могут быть на C++ (свободный режим: без
-исключений, RTTI и стандартной библиотеки; `new`/`delete` работают поверх
-`kmalloc`, конструкторы глобальных объектов вызываются из `cxx_init()`).
-Интерфейсы между языками — обычные C-функции (`include/hix/linkage.h`).
-Сейчас на C++ написаны шахматные правила (`apps/chess_rules.cpp`) и тема
-пиксельного десктопа (`steel/theme.cpp`). Python — для автоматизации:
-`scripts/genfont.py`, `scripts/genicons.py` (генераторы данных), `scripts/shots.py`
-(`make shots`: кадры десктопа в PNG).
+If the kernel detects a Bochs VBE adapter (QEMU with `-vga std`, which is the default;
+also Bochs and VirtualBox), steel switches to **1024x768x32**:
+smooth font, pixel mouse cursor, canvases with alpha blending, rounded
+rectangles. On other hardware, it falls back to the standard 80x25 text mode —
+everything still works there, just without pixel-based programs.
 
-Rust пока не подключён: для i386 нужен целевой `core`, а в среде разработки
-его получить нельзя, поэтому непроверяемый код я не добавлял.
+The desktop still speaks in 80x25 cells; "holes" in the cell grid
+reveal the pixel canvases of programs, so windows overlap as usual.
+Programs register a canvas via `steelctl(STEEL_CTL_CLIENT_SET)` and report
+changes via `STEEL_CTL_CLIENT_DIRTY`.
 
-## Графика (steel)
+## Desktop (desk)
 
-Если ядро находит адаптер Bochs VBE (QEMU с `-vga std`, это значение по
-умолчанию; также Bochs и VirtualBox), steel переключается в **1024x768x32**:
-гладкий шрифт, пиксельный курсор мыши, холсты с альфа-смешиванием, скруглённые
-прямоугольники. При выходе из desk текстовый режим программируется заново (регистры VGA и
-шрифт). В полноэкранном QEMU картинка иногда растягивается — это масштабирование
-окна самим QEMU, помогает повторный вход/выход из fullscreen или
-`-display sdl` / `-display gtk,zoom-to-fit=off`. На другом железе остаётся обычный текстовый режим 80x25 —
-всё работает и там, только без пиксельных программ.
+In the shell, the `desk` command starts the desktop: Hub with Main and Games groups,
+windows with menus, dragging, minimizing, double-clicking icons, Alt+Tab,
+Alt+F4. A PS/2 mouse is required (available in QEMU); the keyboard always works.
 
-Рабочий стол по-прежнему говорит клетками 80x25; «дырки» в сетке клеток
-показывают пиксельные холсты программ, поэтому окна перекрываются как обычно.
-Программа регистрирует холст через `steelctl(STEEL_CTL_CLIENT_SET)` и сообщает
-об изменениях через `STEEL_CTL_CLIENT_DIRTY`.
-
-### Тема Argent
-
-В пиксельном режиме клетки с ролью (заголовок окна, рамка, кнопка, иконка …)
-рисует тема, а не шрифт: платиново-серые окна с полосатым заголовком, мягкие тени,
-закруглённые кнопки, 48x48 иконки, обои. Окна пока выровнены по сетке клеток
-(12x28 пикселей); пиксельная раскладка окон и виджеты — в 0.3.5.
-
-## Рабочий стол (desk)
-
-В шелле команда `desk` включает рабочий стол: Hub с группами Main и Games,
-окна с меню, перетаскивание, сворачивание, двойной клик по иконке, Alt+Tab,
-Alt+F4. Нужна PS/2-мышь (в QEMU есть); клавиатура работает всегда.
-
-| Программа | Что это |
+| Program | What it is |
 |---|---|
-| Files, Notes | файлы qubix-VFS: просмотр, правка, сохранение |
-| Calculator, Clock | калькулятор (слева направо), часы по RTC |
-| System Info, Task List | данные `sysctl` и список процессов |
-| Term | командная строка внутри окна |
-| Minefield, Reversi, Snake, Bricks | игры; правила отделены от окон (`include/desk/games.h`) |
-| **Chess** | шахматы в пиксельном режиме, см. ниже |
+| Files, Notes | qubix-VFS files: view, edit, save |
+| Calculator, Clock | calculator (left-to-right), clock via RTC |
+| System Info, Task List | `sysctl` data and process list |
+| Term | command line inside a window |
+| Minefield, Reversi, Snake, Bricks | games; rules are separated from windows (`include/desk/games.h`) |
+| **Chess** | chess in pixel mode, see below |
 
-`desk chess` (или просто `chess` в шелле) открывает стол сразу с шахматами.
+`desk chess` (or simply `chess` in the shell) opens the desk directly with chess.
 
 ### Chess
 
-Движок (`apps/chess_rules.c`): полные правила — рокировка, взятие на проходе,
-превращение, мат, пат, троекратное повторение, правило 50 ходов, недостаток
-материала; проверен счётом `perft`. Игрок против компьютера (4 уровня:
-альфа-бета с форсированным поиском) или вдвоём за одним экраном.
+Engine (`apps/chess_rules.c`): full rules — castling, en passant,
+promotion, checkmate, stalemate, threefold repetition, 50-move rule, insufficient
+material; verified with `perft` counts. Player vs computer (4 levels:
+alpha-beta with quiescence search) or two players on the same screen.
 
-Интерфейс: доска 8x8 с подсветкой последнего хода и точками возможных ходов,
-перетаскивание фигур мышью или клик-клик, выбор фигуры при превращении,
-анимация хода, шкала оценки, карточки игроков с часами, запись партии в
-алгебраической нотации, кнопки New Game / Undo / Flip, меню Game / Play / Help.
+Interface: 8x8 board with last-move highlighting and possible-move dots,
+dragging pieces with the mouse or click-click, piece selection on promotion,
+move animation, evaluation bar, player cards with clocks, game recording in
+algebraic notation, New Game / Undo / Flip buttons, Game / Play / Help menus.
 
-## Шелл
+## Shell
 
-Строка редактируется на месте (стрелки, Home/End, Ctrl-A/E/K/U/W/L), есть
-история (↑/↓), Tab-дополнение команд и путей, переменные (`set X=1`, `$X`,
-`$?`), кавычки, `;`, перенаправление `>` и `>>`, текущий каталог.
+Line editing in place (arrows, Home/End, Ctrl-A/E/K/U/W/L), history
+(↑/↓), Tab-completion for commands and paths, variables (`set X=1`, `$X`,
+`$?`), quotes, `;`, redirection `>` and `>>`, current directory.
 
 `help` · `ls [-l]` `cd` `pwd` `cat` `echo` `mkdir` `rm` `touch` `cp` `mv` `wc`
 `head` `grep` · `ps` `top` `free` `mem` `devtree` `irqs` `dmesg` `sysctl` ·
 `set` `unset` `history` · `run` `progs` `ipc` `desk` `gfx` · `date` `uptime`
 `uname` `sleep` · `crash` `panic` `reboot` `halt` `exit`.
 
-`kill` пока нет: у потоков нет отмены.
+`kill` is not yet available: threads do not have cancellation.
 
-## Важно
+## Important
 
-Сборка проверена на хосте (тесты, `-Werror`, разбор ELF/multiboot, снимки
-пиксельного вывода), но **на реальной загрузке в QEMU или железе не
-запускалась** — в среде разработки не было QEMU. Если ядро не стартует,
-пришлите вывод `make run-serial`.
+The build has been verified on the host (tests, `-Werror`, ELF/multiboot parsing, pixel
+output snapshots), but **has not been booted on real QEMU or hardware** —
+the development environment did not have QEMU. If the kernel fails to boot,
+please send the output of `make run-serial`.
 
-Архитектура: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), стиль:
-[docs/CODING-STYLE.md](docs/CODING-STYLE.md), авторы и шрифты:
-[docs/CREDITS.md](docs/CREDITS.md), история: [docs/CHANGELOG.md](docs/CHANGELOG.md).
+Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), style:
+[docs/CODING-STYLE.md](docs/CODING-STYLE.md), authors and fonts:
+[docs/CREDITS.md](docs/CREDITS.md), history: [docs/CHANGELOG.md](docs/CHANGELOG.md).
