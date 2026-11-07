@@ -11,8 +11,8 @@
 
 # hix — hi is not unix
 
-A hybrid kernel for i386, grown from your hi-Kernel 0.1.0. The kernel is divided into
-layers with their own names, and the code is styled according to the Linux coding style. Version: **0.3.1**.
+A hybrid kernel for i386, grown from hi-Kernel 0.1.0. The kernel is divided into
+layers with their own names, and the code is styled according to the Linux coding style. Version: **0.3.4**.
 
 | Name | Role | Where |
 |---|---|---|
@@ -66,7 +66,7 @@ Alt+F4. A PS/2 mouse is required (available in QEMU); the keyboard always works.
 
 ### Chess
 
-Engine (`apps/chess_rules.c`): full rules — castling, en passant,
+Engine (`apps/chess_rules.cpp`): full rules — castling, en passant,
 promotion, checkmate, stalemate, threefold repetition, 50-move rule, insufficient
 material; verified with `perft` counts. Player vs computer (4 levels:
 alpha-beta with quiescence search) or two players on the same screen.
@@ -85,9 +85,7 @@ Line editing in place (arrows, Home/End, Ctrl-A/E/K/U/W/L), history
 `help` · `ls [-l]` `cd` `pwd` `cat` `echo` `mkdir` `rm` `touch` `cp` `mv` `wc`
 `head` `grep` · `ps` `top` `free` `mem` `devtree` `irqs` `dmesg` `sysctl` ·
 `set` `unset` `history` · `run` `progs` `ipc` `desk` `gfx` · `date` `uptime`
-`uname` `sleep` · `crash` `panic` `reboot` `halt` `exit`.
-
-`kill` is not yet available: threads do not have cancellation.
+`uname` `sleep` · `crash` `panic` `reboot` `halt` `exit`. `kill`
 
 ## Important
 
