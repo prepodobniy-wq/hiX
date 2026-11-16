@@ -1,0 +1,6 @@
+# GitHub language statistics: the Rust crate is part of hix, not a vendored
+# dependency. Make that explicit so the repository language bar keeps Rust.
+*.rs linguist-detectable=true
+*.rs linguist-language=Rust
+rust/** linguist-vendored=false
+tools/shotsum/** linguist-vendored=false
