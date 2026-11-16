@@ -7,7 +7,10 @@
 void *memset(void *s, int c, size_t n);
 void *memcpy(void *dst, const void *src, size_t n);
 void *memmove(void *dst, const void *src, size_t n);
+/* n 32-bit words, for pixel rows */
+void memset32(u32 *p, u32 v, size_t n);
 int memcmp(const void *a, const void *b, size_t n);
+int bcmp(const void *a, const void *b, size_t n);	/* Rust core emits this */
 
 size_t strlen(const char *s);
 size_t strnlen(const char *s, size_t max);

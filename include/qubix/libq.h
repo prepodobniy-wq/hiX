@@ -117,6 +117,11 @@ static inline long q_ioctl(int fd, long req, long arg)
 	return q_syscall(SYS_ioctl, fd, req, arg, 0, 0);
 }
 
+static inline long q_kill(long pid, int sig)
+{
+	return Q2(SYS_kill, pid, sig);
+}
+
 static inline long q_reboot(int howto)
 {
 	return Q1(SYS_reboot, howto);

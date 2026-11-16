@@ -49,6 +49,30 @@ static void qb_client_clear(int idx)
 	q_steelctl(STEEL_CTL_CLIENT_CLEAR, idx, 0, 0);
 }
 
+static void qb_panel(const struct steel_panel *p)
+{
+	q_steelctl(STEEL_CTL_PANEL, (long)p, 0, 0);
+}
+
+static void qb_float(const steel_cell_t *cells, int cx, int cy, int cw, int ch,
+		     int px, int py)
+{
+	struct steel_float_req rq = { px, py, cx, cy, cw, ch, cells };
+
+	q_steelctl(STEEL_CTL_FLOAT, (long)&rq, 0, 0);
+}
+
+static long qb_wall_time(void)
+{
+	return q_time();
+}
+
+static void qb_power(bool halt)
+{
+	q_steelctl(STEEL_CTL_UNGRAB, 0, 0, 0);
+	q_reboot(halt ? RB_HALT : RB_AUTOBOOT);
+}
+
 const struct desk_backend desk_qubix_backend = {
 	.wait_event = qb_wait_event,
 	.present = qb_present,
@@ -56,6 +80,10 @@ const struct desk_backend desk_qubix_backend = {
 	.client_set = qb_client_set,
 	.client_dirty = qb_client_dirty,
 	.client_clear = qb_client_clear,
+	.panel = qb_panel,
+	.float_win = qb_float,
+	.wall_time = qb_wall_time,
+	.power = qb_power,
 };
 
 int desk_main(int argc, char **argv)

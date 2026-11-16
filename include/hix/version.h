@@ -5,11 +5,12 @@
 #define HIX_NAME	"hix"
 #define HIX_CODENAME	"hi kernel"
 #define HIX_EXPAND	"hi is not unix"
-#define HIX_RELEASE	"0.3.4"
+#define HIX_RELEASE	"1.0.0"
 
 /* the four pillars, see docs/ARCHITECTURE.md */
 #define AETHER_NAME	"aether"	/* tasks, ports, scheduler */
 #define QUBIX_NAME	"qubix"		/* processes, syscalls, shell */
 #define STEEL_NAME	"steel"		/* graphics */
+#define GANTRY_NAME	"gantry"	/* the platform above all of them, see gantry/ */
 
 #endif /* _HIX_VERSION_H */

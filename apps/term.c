@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * desk: MS-Term, in spirit. A small command interpreter in a window:
- * dir, type, cd, ver, date, mem, ps, devtree, cls, run <program>, exit.
+ * desk: Term. A small command interpreter in a window:
+ * dir, type, cd, ver, date, mem, ps, kill, hixfetch, devtree, cls, run <program>, exit.
  * It reads the same kernel interfaces as the shell does, through libq.
  */
 #include <hix/kernel.h>
 #include <hix/version.h>
 #include <qubix/libq.h>
+#include <qubix/hixfetch.h>
 #include <desk/desk.h>
 
 #define LINE_W		76
@@ -219,7 +220,8 @@ static void execute(struct win *w, struct term *d, char *line)
 
 	if (!strcmp(cmd, "help") || !strcmp(cmd, "?")) {
 		put(d, "dir [path]   type <file>   cd [path]   cls   ver   date\n"
-		       "mem   ps   devtree   uname   echo <text>   run <program>   exit\n"
+		       "mem   ps   kill <pid>   hixfetch   devtree   uname\n"
+		       "echo <text>   run <program>   exit\n"
 		       "Programs: hub files notes calc clock sysinfo tasks\n"
 		       "          mines reversi snake bricks");
 	} else if (!strcmp(cmd, "dir") || !strcmp(cmd, "ls")) {
@@ -237,12 +239,36 @@ static void execute(struct win *w, struct term *d, char *line)
 
 		putf(d, "Current time is %02ld:%02ld:%02ld", s / 3600,
 		     s / 60 % 60, s % 60);
+	} else if (!strcmp(cmd, "hixfetch")) {
+		static char text[1024];
+
+		hixfetch_text(text, sizeof(text));
+		put(d, text);
 	} else if (!strcmp(cmd, "mem")) {
 		cmd_sysctl(d, "hix.heap");
 	} else if (!strcmp(cmd, "ps")) {
 		cmd_sysctl(d, "hix.ps");
 	} else if (!strcmp(cmd, "devtree")) {
 		cmd_sysctl(d, "hix.devtree");
+	} else if (!strcmp(cmd, "kill")) {
+		long pid = 0, r;
+		const char *s = arg;
+
+		for (; *s >= '0' && *s <= '9'; s++)
+			pid = pid * 10 + (*s - '0');
+		if (!*arg || *s || pid <= 0) {
+			put(d, "usage: kill <pid>");
+			return;
+		}
+		r = q_kill(pid, 15);
+		if (r == -ESRCH)
+			put(d, "No such process");
+		else if (r == -EPERM)
+			put(d, "That process may not be killed");
+		else if (r < 0)
+			put(d, "kill failed");
+		else
+			put(d, "Signalled");
 	} else if (!strcmp(cmd, "echo")) {
 		put(d, arg);
 	} else if (!strcmp(cmd, "run") || !strcmp(cmd, "start")) {
@@ -260,7 +286,7 @@ static void dos_open(struct win *w, const char *arg)
 
 	(void)arg;
 	strlcpy(d->cwd, "/", sizeof(d->cwd));
-	put(d, "hix Command Prompt  [" HIX_NAME " " HIX_RELEASE "]\n"
+	put(d, "hix Term  [" HIX_NAME " " HIX_RELEASE "]\n"
 	       "Type 'help' for the commands, 'exit' to close the window.\n");
 }
 
@@ -315,7 +341,7 @@ const struct app app_term = {
 	.icon = { "\xDA\xC4\xC4\xC4\xC4\xBF", "\xB3" "C:\\_\xB3" },
 	.icon_attr = { STEEL_ATTR(STEEL_LGRAY, STEEL_BLACK),
 		       STEEL_ATTR(STEEL_LGRAY, STEEL_BLACK) },
-	.cw = 76, .ch = 21,
+	.cw = 66, .ch = 19,
 	.flags = APP_SINGLE | APP_RESIZABLE,
 	.open = dos_open,
 	.paint = dos_paint,

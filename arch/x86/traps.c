@@ -154,6 +154,15 @@ static void do_exception(struct pt_regs *regs)
 {
 	unsigned int vec = regs->vector;
 
+	if ((regs->cs & 3) == 3) {		/* the fault is the program's own */
+		char what[64];
+
+		snprintf(what, sizeof(what), "%s (error code %x, cr2 %08x)",
+			 vec < 32 ? exception_names[vec] : "trap",
+			 regs->error_code, vec == X86_TRAP_PF ? (u32)read_cr2() : 0);
+		arch_user_fault(regs, what);
+	}
+
 	if (vec == X86_TRAP_PF) {
 		unsigned long addr = read_cr2();
 		const char *why = vm_fault_reason(addr);

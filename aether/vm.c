@@ -131,6 +131,11 @@ void vm_init(void)
 		top >> 20, (npde + 1) * PAGE_SIZE >> 10);
 }
 
+const u32 *vm_kernel_pgdir(void)
+{
+	return kernel_pgdir;
+}
+
 bool vm_enabled(void)
 {
 	return paging_on;

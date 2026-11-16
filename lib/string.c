@@ -7,8 +7,27 @@
  */
 #include <hix/string.h>
 
+/* i386 kernel builds use string instructions, see lib/fastmem.h */
+#if defined(__i386__) && !defined(HIX_HOST_TEST)
+#define HIX_FAST_MEM
+#include "fastmem.h"
+#endif
+
+void memset32(u32 *p, u32 v, size_t n)
+{
+#ifdef HIX_FAST_MEM
+	fast_memset32(p, v, n);
+#else
+	while (n--)
+		*p++ = v;
+#endif
+}
+
 void *memset(void *s, int c, size_t n)
 {
+#ifdef HIX_FAST_MEM
+	return fast_memset(s, c, n);
+#endif
 	unsigned char *p = s;
 
 	while (n--)
@@ -18,6 +37,9 @@ void *memset(void *s, int c, size_t n)
 
 void *memcpy(void *dst, const void *src, size_t n)
 {
+#ifdef HIX_FAST_MEM
+	return fast_memcpy(dst, src, n);
+#endif
 	unsigned char *d = dst;
 	const unsigned char *s = src;
 
@@ -28,6 +50,9 @@ void *memcpy(void *dst, const void *src, size_t n)
 
 void *memmove(void *dst, const void *src, size_t n)
 {
+#ifdef HIX_FAST_MEM
+	return fast_memmove(dst, src, n);
+#endif
 	unsigned char *d = dst;
 	const unsigned char *s = src;
 
@@ -56,6 +81,12 @@ int memcmp(const void *a, const void *b, size_t n)
 		q++;
 	}
 	return 0;
+}
+
+/* compiler-rt/Rust call this legacy spelling for memcmp */
+int bcmp(const void *a, const void *b, size_t n)
+{
+	return memcmp(a, b, n);
 }
 
 size_t strlen(const char *s)

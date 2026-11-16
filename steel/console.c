@@ -7,6 +7,7 @@
  * ESC[2J (clear), ESC[H (home). printk output is tinted by log level.
  */
 #include <hix/kernel.h>
+#include <hix/bootconfig.h>
 #include <hix/console.h>
 #include <hix/spinlock.h>
 #include <steel/steel.h>
@@ -351,11 +352,13 @@ static void printk_sink(struct console *con, int level, const char *s,
 
 static struct console steel_console = {
 	.name = "steel",
-	.max_level = 6,			/* info and above; not debug */
+	.max_level = 6,		/* changed in steel_con_register_printk() */
 	.write = printk_sink,
 };
 
 void steel_con_register_printk(void)
 {
+	/* quiet boot is a runtime choice, see kernel/bootconfig.c */
+	steel_console.max_level = hix_boot.quiet ? 4 : 6;
 	register_console(&steel_console);
 }

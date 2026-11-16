@@ -5,6 +5,9 @@
 #include <steel/gfxdev.h>
 
 static struct pixdev pixdev;
+/* the clean copy of the screen and the floating window, see pixdev.h */
+static u32 back_mem[GFX_SCREEN_W * GFX_SCREEN_H];
+static u32 sprite_mem[PIX_SPRITE_PX];
 static struct steel_device *text_device;
 static bool active;
 
@@ -42,7 +45,7 @@ int steel_gfx_enter(void)
 	if (!mem)
 		return -ENODEV;
 	gfx_canvas_init(&fb, GFX_SCREEN_W, GFX_SCREEN_H, mem);
-	pixdev_init(&pixdev, &fb);
+	pixdev_init(&pixdev, &fb, back_mem, sprite_mem);
 	pixdev_cursor(&pixdev, GFX_SCREEN_W / 2, GFX_SCREEN_H / 2, true);
 	text_device = steel_get_device();
 	steel_set_device(&gfx_device);

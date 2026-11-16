@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <hix/kernel.h>
 #include <aether/vm.h>
+#include <aether/task.h>
 #include "t32.h"
 
 char boot_stack_bottom[16];
@@ -98,4 +99,5 @@ void vm_stack_free(void *base, unsigned int pages)
 	stacks_freed++;
 }
 
+void arch_thread_switch(struct thread *next) { (void)next; }
 bool vm_addr_is_mapped(unsigned long a) { (void)a; return true; }

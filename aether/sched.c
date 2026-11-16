@@ -136,6 +136,7 @@ void schedule(void)
 
 	if (next != prev) {
 		current_thread = next;
+		arch_thread_switch(next);
 		ctx_switch(&prev->sp, next->sp);
 		/* we are prev again, some time later */
 		reap_dead();

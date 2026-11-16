@@ -78,16 +78,12 @@ static bool clip_rect(const struct gfx_canvas *c, int *x, int *y, int *w,
 
 void gfx_fill(struct gfx_canvas *c, int x, int y, int w, int h, u32 color)
 {
-	int i, j;
+	int j;
 
 	if (!clip_rect(c, &x, &y, &w, &h))
 		return;
-	for (j = 0; j < h; j++) {
-		u32 *row = &c->px[(y + j) * c->stride + x];
-
-		for (i = 0; i < w; i++)
-			row[i] = color;
-	}
+	for (j = 0; j < h; j++)
+		memset32(&c->px[(y + j) * c->stride + x], color, (size_t)w);
 }
 
 void gfx_fill_a(struct gfx_canvas *c, int x, int y, int w, int h, u32 color,

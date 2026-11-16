@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[package]
+name = "shotsum"
+version = "0.1.0"
+edition = "2021"
+description = "Golden checksums for the PPM frames the hix desktop tests render"
+license = "GPL-2.0-only"
+
+[dependencies]
+
+[profile.release]
+opt-level = 2

@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install build and boot tools
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends \
+            build-essential gcc-multilib g++-multilib nasm \
+            grub-pc-bin grub-common xorriso qemu-system-x86 python3 \
+            python3-cryptography
+
+      - name: add the i686 Rust target
+        run: rustup target add i686-unknown-linux-gnu
+
+      - name: version
+        run: make version
+
+      - name: verify (host tests, style, Rust, crypto, frames)
+        run: make RUST=1 verify
+
+      - name: build the ISO
+        run: make RUST=1 iso
+
+      - name: smoke test in QEMU (COM1)
+        run: python3 scripts/smoke.py --require-rust
+
+      - name: package a tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: make RUST=1 release
+
+      - name: upload kernel and ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: hix-${{ github.sha }}
+          path: |
+            build/hix.elf
+            build/hix.iso
+          if-no-files-found: error
+
+      - name: upload release directory
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: hix-release-${{ github.ref_name }}
+          path: dist/
+          if-no-files-found: error

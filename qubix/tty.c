@@ -7,6 +7,7 @@
  * runs in the reader's own context, so interrupts stay short.
  */
 #include <hix/kernel.h>
+#include <hix/serial.h>
 #include <hix/spinlock.h>
 #include <aether/waitq.h>
 #include <steel/steel.h>
@@ -72,9 +73,16 @@ int tty_getc(void)
 	return tty_getc_timeout(0);
 }
 
+/* every byte the tty shows also goes to COM1 when the UART is present */
+static void tty_emit(const char *s, size_t n)
+{
+	steel_con_write(s, n);
+	serial_tty_write(s, n);
+}
+
 ssize_t tty_write(const char *buf, size_t len)
 {
-	steel_con_write(buf, len);
+	tty_emit(buf, len);
 	return (ssize_t)len;
 }
 
@@ -103,7 +111,7 @@ ssize_t tty_read(char *buf, size_t len)
 		int c = tty_getc();
 
 		if (c == '\n') {
-			steel_con_write("\n", 1);
+			tty_emit("\n", 1);
 			if (n < len)
 				buf[n++] = '\n';
 			return (ssize_t)n;
@@ -114,17 +122,17 @@ ssize_t tty_read(char *buf, size_t len)
 			continue;
 		}
 		if (c == 3) {			/* Ctrl-C: abandon the line */
-			steel_con_write("^C\n", 3);
+			tty_emit("^C\n", 3);
 			buf[0] = '\n';
 			return 1;
 		}
 		if (c == 12) {			/* Ctrl-L */
-			steel_con_write("\x1b[2J", 4);
+			tty_emit("\x1b[2J", 4);
 			continue;
 		}
 		if (c == 21) {			/* Ctrl-U: kill line */
 			while (n) {
-				steel_con_write("\b", 1);
+				tty_emit("\b", 1);
 				n--;
 			}
 			continue;
@@ -132,7 +140,7 @@ ssize_t tty_read(char *buf, size_t len)
 		if (c == '\b' || c == 0x7F) {
 			if (n) {
 				n--;
-				steel_con_write("\b", 1);
+				tty_emit("\b", 1);
 			}
 			continue;
 		}
@@ -142,7 +150,7 @@ ssize_t tty_read(char *buf, size_t len)
 			char ch = (char)c;
 
 			buf[n++] = ch;
-			steel_con_write(&ch, 1);
+			tty_emit(&ch, 1);
 		}
 	}
 }

@@ -115,7 +115,7 @@ static int rtc_start(void)
 
 static struct hix_driver rtc_driver = {
 	.name = "cmos-rtc",
-	.class = "clock",
+	.kind = "clock",
 	.level = DRV_LEVEL_PLATFORM,
 	.start = rtc_start,
 };

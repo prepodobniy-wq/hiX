@@ -56,6 +56,12 @@ void gdt_set_df_cr3(unsigned long cr3);
 void gdt_set_kernel_stack(unsigned long esp0);
 u16 gdt_df_selector(void);
 
+/* a ring 3 program faulted: end its process (qubix/uexec.c) */
+void arch_user_fault(const struct pt_regs *regs, const char *what)
+	__attribute__((noreturn));
+void enter_user(unsigned long entry, unsigned long user_esp)
+	__attribute__((noreturn));
+
 /* kernel/panic.c: report from the double fault task, never returns */
 void double_fault_report(const struct pt_regs *regs) __attribute__((noreturn));
 

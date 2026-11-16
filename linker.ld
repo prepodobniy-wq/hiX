@@ -14,7 +14,7 @@ SECTIONS
 
 	.text : ALIGN(4K)
 	{
-		*(.multiboot)		/* must be within the first 8 KiB */
+		KEEP(*(.multiboot))	/* must be within the first 8 KiB */
 		*(.text .text.*)
 	}
 

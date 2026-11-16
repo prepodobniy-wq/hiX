@@ -9,10 +9,15 @@
  * table. Programs from the qubix program table are started with `run`.
  */
 #include <hix/kernel.h>
+#include <hix/bootconfig.h>
 #include <qubix/libq.h>
+#include <qubix/crypto.h>
+#include <qubix/hixfetch.h>
 #include <qubix/proc.h>
 #include <qubix/shlib.h>
 #include <qubix/tty.h>
+#include <qubix/syscall.h>
+#include <gantry/tweak.h>
 
 #define COLS		80
 #define PATH_MAX_LEN	96
@@ -72,16 +77,23 @@ static bool is_dir(const char *abs)
 
 static void banner(void)
 {
-	q_puts(C_CYAN
-	       "  _     _      \n"
-	       " | |__ (_)_  __\n"
-	       " | '_ \\| \\ \\/ /   " C_BOLD "hix" C_CYAN " - hi is not unix\n"
-	       " | | | | |>  <    " C_RESET "aether " C_CYAN "+" C_RESET " qubix "
-	       C_CYAN "+" C_RESET " steel\n"
-	       C_CYAN " |_| |_|_/_/\\_\\\n" C_RESET "\n");
-	print_sysctl("kern.version");
-	q_puts("\nType 'help' for the command list; Tab completes, Up/Down "
-	       "recall.\n\n");
+	if (hix_boot.splash) {
+		/* the splash already showed the logo; keep the header compact */
+		print_sysctl("kern.version");
+		q_puts("\nType 'help' for the command list; Tab completes, "
+		       "Up/Down recall.\n\n");
+	} else {
+		q_puts(C_CYAN
+		       "  _     _      \n"
+		       " | |__ (_)_  __\n"
+		       " | '_ \\| \\ \\/ /   " C_BOLD "hix" C_CYAN " - hi is not unix\n"
+		       " | | | | |>  <    " C_RESET "aether " C_CYAN "+" C_RESET " qubix "
+		       C_CYAN "+" C_RESET " steel\n"
+		       C_CYAN " |_| |_|_/_/\\_\\\n" C_RESET "\n");
+		print_sysctl("kern.version");
+		q_puts("\nType 'help' for the command list; Tab completes, "
+		       "Up/Down recall.\n\n");
+	}
 }
 
 /* ---- file commands --------------------------------------------------- */
@@ -488,11 +500,63 @@ static int cmd_uname(int argc, char **argv)
 	return 0;
 }
 
+static int cmd_hixfetch(int argc, char **argv)
+{
+	static char text[1024];
+
+	hixfetch_text(text, sizeof(text));
+	q_puts(text);
+	return 0;
+}
+
+static int cmd_kill(int argc, char **argv)
+{
+	long pid, r;
+	char *s;
+
+	if (argc < 2) {
+		q_puts("usage: kill <pid>\n");
+		return 1;
+	}
+	s = argv[1];
+	pid = 0;
+	for (; *s >= '0' && *s <= '9'; s++)
+		pid = pid * 10 + (*s - '0');
+	if (*s || pid <= 0) {
+		q_printf("kill: bad pid '%s'\n", argv[1]);
+		return 1;
+	}
+	r = q_kill(pid, 15);
+	if (r == -ESRCH)
+		q_printf("kill: no process %ld\n", pid);
+	else if (r == -EPERM)
+		q_printf("kill: process %ld may not be killed\n", pid);
+	else if (r < 0)
+		q_printf("kill: error %ld\n", r);
+	return r ? 1 : 0;
+}
+
 static int cmd_uptime(int argc, char **argv)
 {
 	unsigned long s = sysctl_num("kern.uptime");
 
 	q_printf("up %lu:%02lu:%02lu\n", s / 3600, s % 3600 / 60, s % 60);
+	return 0;
+}
+
+static int cmd_crypto(int argc, char **argv)
+{
+	long r = hix_crypto_selftest();
+
+	if (r == -ENOSYS) {
+		q_puts("crypto: the Rust module is not built into this kernel\n");
+		return 1;
+	}
+	if (r) {
+		q_printf("crypto: self-test FAILED (%ld)\n", r);
+		return 1;
+	}
+	q_puts("crypto: ChaCha20-Poly1305 self-test ok (Rust, ring 0)\n");
 	return 0;
 }
 
@@ -572,6 +636,41 @@ static int cmd_top(int argc, char **argv)
 	return 0;
 }
 
+static int cmd_registry(int argc, char **argv)
+{
+	print_sysctl("hix.registry");
+	return 0;
+}
+
+/* tweak [on|off <name>]: list the Gantry tweaks or switch one */
+static int cmd_tweak(int argc, char **argv)
+{
+	struct kit_msg m;
+	long h;
+
+	if (argc == 1) {
+		print_sysctl("hix.tweaks");
+		return 0;
+	}
+	if (argc != 3 || (strcmp(argv[1], "on") && strcmp(argv[1], "off"))) {
+		q_puts("usage: tweak [on|off <name>]\n");
+		return 1;
+	}
+	h = Q3(SYS_gantry, GANTRY_LOOKUP, "kit.tweak", 0);
+	if (h < 0) {
+		q_puts("tweak: kit.tweak is not available\n");
+		return 1;
+	}
+	snprintf(m.data, sizeof(m.data), "%s=%s", argv[2], argv[1]);
+	m.len = strlen(m.data) + 1;
+	h = Q3(SYS_gantry, GANTRY_CALL, (long)(h | (KIT_TWEAK_SET << 16)), &m);
+	if (h < 0) {
+		q_printf("tweak: %s: error %ld\n", argv[2], h);
+		return 1;
+	}
+	return 0;
+}
+
 static int cmd_devtree(int argc, char **argv)
 {
 	print_sysctl("hix.devtree");
@@ -596,8 +695,8 @@ static int cmd_dmesg(int argc, char **argv)
 static int cmd_sysctl(int argc, char **argv)
 {
 	if (argc < 2) {
-		q_puts("usage: sysctl <kern.ostype|kern.version|hw.memsize|"
-		       "hix.ps|hix.heap|...>\n");
+		q_puts("usage: sysctl <kern.ostype|kern.version|kern.cmdline|"
+		       "hix.boot|hix.ps|hix.heap|...>\n");
 		return 1;
 	}
 	print_sysctl(argv[1]);
@@ -610,7 +709,7 @@ static int cmd_progs(int argc, char **argv)
 	int i;
 
 	for (i = 0; i < qprogs_count; i++)
-		q_printf("  %-10s %s\n", qprogs[i].name, qprogs[i].help);
+		q_printf("  %-12s %s\n", qprogs[i].name, qprogs[i].help);
 	return 0;
 }
 
@@ -647,6 +746,50 @@ static int cmd_run(int argc, char **argv)
 	}
 	if (status)
 		q_printf("[pid %ld exited with %d]\n", pid, status);
+	return status;
+}
+
+static int cmd_splash(int argc, char **argv)
+{
+	char cmd[48] = "splash";
+	int status;
+	long pid;
+
+	if (argc > 2) {
+		q_puts("usage: splash [seconds]\n");
+		return 1;
+	}
+	if (argc > 1) {
+		strlcpy(cmd + strlen(cmd), " ", sizeof(cmd));
+		strlcpy(cmd + strlen(cmd), argv[1], sizeof(cmd) - strlen(cmd));
+	}
+	pid = spawn_and_wait(cmd, &status);
+	if (pid < 0) {
+		q_printf("splash: error %ld\n", pid);
+		return 1;
+	}
+	return status;
+}
+
+static int cmd_screensaver(int argc, char **argv)
+{
+	char cmd[64] = "screensaver";
+	int status;
+	long pid;
+
+	if (argc > 2) {
+		q_puts("usage: screensaver [stars|matrix|clock|blank]\n");
+		return 1;
+	}
+	if (argc > 1) {
+		strlcpy(cmd + strlen(cmd), " ", sizeof(cmd));
+		strlcpy(cmd + strlen(cmd), argv[1], sizeof(cmd) - strlen(cmd));
+	}
+	pid = spawn_and_wait(cmd, &status);
+	if (pid < 0) {
+		q_printf("screensaver: error %ld\n", pid);
+		return 1;
+	}
 	return status;
 }
 
@@ -806,12 +949,17 @@ static const struct builtin builtins[] = {
 	{ "help", cmd_help, "this list" },
 	{ "uname", cmd_uname, "uname [-a]: system name" },
 	{ "uptime", cmd_uptime, "time since boot" },
+	{ "crypto", cmd_crypto, "run the Rust crypto self-test" },
+	{ "hixfetch", cmd_hixfetch, "a logo and facts about the system" },
+	{ "kill", cmd_kill, "kill <pid>: end a process (at its next system call)" },
 	{ "date", cmd_date, "date and time (UTC)" },
 	{ "mem", cmd_mem, "memory and heap statistics" },
 	{ "free", cmd_mem, "same as mem" },
 	{ "ps", cmd_ps, "tasks, threads and qubix processes" },
 	{ "top", cmd_top, "live ps and memory; any key leaves" },
 	{ "devtree", cmd_devtree, "tree of drivers" },
+	{ "tweak", cmd_tweak, "tweak [on|off <name>]: Gantry extensions" },
+	{ "registry", cmd_registry, "the Gantry registry: platform, buses, devices, drivers" },
 	{ "irqs", cmd_irqs, "interrupt counters" },
 	{ "dmesg", cmd_dmesg, "kernel log (PgUp/PgDn scroll the screen)" },
 	{ "sysctl", cmd_sysctl, "sysctl <name>: kern.* hw.* hix.* values" },
@@ -837,6 +985,8 @@ static const struct builtin builtins[] = {
 	{ "desk", cmd_desk, "desk [program]: the desktop" },
 	{ "gfx", cmd_gfx, "steel graphics demo" },
 	{ "clear", cmd_clear, "clear the screen (Ctrl-L too)" },
+	{ "splash", cmd_splash, "splash [seconds]: show the boot start screen again" },
+	{ "screensaver", cmd_screensaver, "screensaver [stars|matrix|clock|blank]: idle screen" },
 	{ "sleep", cmd_sleep, "sleep <seconds>" },
 	{ "true", cmd_true, "do nothing, successfully" },
 	{ "false", cmd_false, "do nothing, unsuccessfully" },
@@ -859,6 +1009,9 @@ static int cmd_help(int argc, char **argv)
 	       "\nediting: arrows, Home/End, Del, Ctrl-A/E/K/U/W, Up/Down history,\n"
 	       "Tab completes commands and file names.\n"
 	       "syntax: 'quotes', \"quotes with $VAR\", ; && ||, # comment.\n");
+	q_printf("screensaver: %s after %d seconds idle (any key wakes it);\n"
+		 "  'screensaver NAME' runs one now.\n",
+		 hix_boot.screensaver, hix_boot.screensaver_timeout);
 	return 0;
 }
 
@@ -889,6 +1042,24 @@ static int run_one(struct sh_cmd *c)
 			return builtins[i].fn(c->argc, c->argv);
 	if (is_desk_program(c->argv[0]))
 		return run_desk(c->argv[0]);
+	{
+		/* anything else is a program: built in, or an ELF in /bin */
+		char cmd[SH_LINE_MAX] = "";
+		int j, status;
+		long pid;
+
+		for (j = 0; j < c->argc; j++) {
+			strlcpy(cmd + strlen(cmd), c->argv[j], sizeof(cmd) - strlen(cmd));
+			if (j + 1 < c->argc)
+				strlcpy(cmd + strlen(cmd), " ", sizeof(cmd) - strlen(cmd));
+		}
+		pid = spawn_and_wait(cmd, &status);
+		if (pid >= 0) {
+			if (status)
+				q_printf("[%s exited with %d]\n", c->argv[0], status);
+			return status;
+		}
+	}
 	q_printf(C_RED "sh: %s: command not found" C_RESET "\n", c->argv[0]);
 	return 127;
 }
@@ -1033,17 +1204,35 @@ static void complete(const char *prompt)
 static bool read_line(char *out, size_t size)
 {
 	char prompt[160];
+	unsigned long idle_ms = (unsigned long)hix_boot.screensaver_timeout * 1000;
 	int width = prompt_text(prompt, sizeof(prompt));
 	bool ok = true;
 
 	se_begin(&edit, COLS - 1 - width);
-	q_ioctl(0, TTY_SETTIMEOUT, 0);
+	q_ioctl(0, TTY_SETTIMEOUT, idle_ms);
 	q_ioctl(0, TTY_SETRAW, 1);
 	redraw(prompt);
 	for (;;) {
 		int key = 0, act;
 		long n = q_read(0, &key, sizeof(key));
 
+		if (n == -ETIMEDOUT && idle_ms) {
+			int status;
+			long pid;
+
+			/* nobody typed for a while: hand the screen over */
+			q_ioctl(0, TTY_SETTIMEOUT, 0);
+			q_ioctl(0, TTY_SETRAW, 0);
+			q_puts("\n");
+			pid = q_spawn("screensaver");
+			if (pid >= 0)
+				q_wait4(pid, &status);
+			q_ioctl(0, TTY_SETTIMEOUT, idle_ms);
+			q_ioctl(0, TTY_SETRAW, 1);
+			q_puts("\x1b[2J");
+			redraw(prompt);
+			continue;
+		}
 		if (n < (long)sizeof(key))
 			continue;
 		act = se_key(&edit, key);
@@ -1079,6 +1268,12 @@ int sh_main(int argc, char **argv)
 
 	(void)argc;
 	(void)argv;
+	/*
+	 * The state below is static and init starts a new shell after `exit`:
+	 * a flag left over from the last one would make every new shell leave
+	 * at once, and init would restart them forever.
+	 */
+	want_exit = false;
 	se_init(&edit);
 	sh_var_set(&vars, "PWD", cwd);
 	sh_var_set(&vars, "HOSTNAME", "hix");

@@ -8,9 +8,11 @@
 #define pr_fmt(fmt) "hix: " fmt
 
 #include <hix/kernel.h>
+#include <hix/bootconfig.h>
 #include <hix/driver.h>
 #include <hix/multiboot.h>
 #include <hix/version.h>
+#include <gantry/gantry.h>
 #include <asm/trap.h>
 #include <aether/kalloc.h>
 #include <aether/pmm.h>
@@ -35,6 +37,13 @@ void hix_start(u32 magic, const struct multiboot_info *mbi)
 	idt_init();
 	pic_init();
 
+	/* boot-time overrides need the Multiboot block, not memory management */
+	if (magic == MULTIBOOT_BOOTLOADER_MAGIC &&
+	    (mbi->flags & MB_INFO_CMDLINE) && mbi->cmdline)
+		hix_bootconfig_init((const char *)(uintptr_t)mbi->cmdline);
+	else
+		hix_bootconfig_init(NULL);
+
 	/* consoles first, so everything below can report */
 	driver_start_levels(DRV_LEVEL_CONSOLE, DRV_LEVEL_CONSOLE);
 	pr_notice("%s %s (%s) - %s + %s + %s\n", HIX_NAME, HIX_RELEASE,
@@ -55,6 +64,9 @@ void hix_start(u32 magic, const struct multiboot_info *mbi)
 
 	/* drivers: timer, clock, keyboard */
 	driver_start_levels(DRV_LEVEL_PLATFORM, DRV_LEVEL_LATE);
+
+	/* gantry: the registry of the machine, driver matching */
+	gantry_boot();
 
 	/* qubix: processes and syscalls */
 	qubix_init();

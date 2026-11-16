@@ -5,20 +5,31 @@
  * `sh` lives in shell.c.
  */
 #include <hix/kernel.h>
+#include <hix/bootconfig.h>
 #include <qubix/libq.h>
 #include <qubix/proc.h>
+#include <qubix/splash.h>
+#include <qubix/uexec.h>
 
 int sh_main(int argc, char **argv);
 int desk_main(int argc, char **argv);
 
-/* pid 1: starts the shell and starts it again whenever it exits */
+/* pid 1: starts the splash once, then the shell, and starts it again when it
+ * exits */
 static int init_main(int argc, char **argv)
 {
+	static bool splash_done;
 	int status;
 	long pid;
 
 	(void)argc;
 	(void)argv;
+	if (hix_boot.splash && !splash_done) {
+		splash_done = true;
+		pid = q_spawn("splash");
+		if (pid >= 0)
+			q_wait4(pid, &status);
+	}
 	for (;;) {
 		pid = q_spawn("sh");
 		if (pid < 0) {
@@ -29,6 +40,7 @@ static int init_main(int argc, char **argv)
 		q_wait4(pid, &status);
 		q_printf("init: sh (pid %ld) exited with %d, restarting\n",
 			 pid, status);
+		q_sleep_ms(200);	/* never a busy loop, whatever the shell does */
 	}
 	return 0;
 }
@@ -149,11 +161,16 @@ static int ipccli_main(int argc, char **argv)
 
 const struct qprog qprogs[] = {
 	{ "init", "the init process (pid 1)", init_main },
+	{ "splash", "the boot start screen (clock and progress)", splash_main },
+	{ "screensaver", "screensaver [stars|matrix|clock|blank]", screensaver_main },
 	{ "sh", "the shell", sh_main },
 	{ "hello", "print arguments and pids", hello_main },
 	{ "spin", "spin [seconds]: busy loop", spin_main },
 	{ "ipcsrv", "port IPC demo server", ipcsrv_main },
 	{ "ipccli", "port IPC demo client", ipccli_main },
+	{ "hello3", "ring 3: say hello through int 0x80", uexec_hello },
+	{ "fault3", "ring 3: touch kernel memory (gets killed)", uexec_fault },
+	{ "probe3", "ring 3: bad pointer, bad syscall, cli", uexec_probe },
 	{ "desk", "desk [program]: the desktop (windows, games)", desk_main },
 };
 

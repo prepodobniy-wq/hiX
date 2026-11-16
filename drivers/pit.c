@@ -31,7 +31,7 @@ static int pit_start(void)
 
 static struct hix_driver pit_driver = {
 	.name = "pit",
-	.class = "timer",
+	.kind = "timer",
 	.level = DRV_LEVEL_PLATFORM,
 	.start = pit_start,
 };

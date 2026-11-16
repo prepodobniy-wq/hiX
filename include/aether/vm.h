@@ -22,6 +22,9 @@ const char *vm_fault_reason(unsigned long addr);
 void *vm_stack_alloc(unsigned int pages);
 void vm_stack_free(void *base, unsigned int pages);
 
+/* page directory every ring 3 address space shares its kernel half with */
+const u32 *vm_kernel_pgdir(void);
+
 /* is paging on yet? (before vm_init() addresses are physical) */
 bool vm_enabled(void);
 

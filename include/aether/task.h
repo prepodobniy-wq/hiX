@@ -25,6 +25,7 @@ enum thread_state {
 };
 
 struct task;
+struct uspace;
 
 struct thread {
 	unsigned long sp;		/* saved kernel stack pointer */
@@ -33,6 +34,7 @@ struct thread {
 	enum thread_state state;
 	struct task *task;
 
+	struct uspace *uspace;		/* ring 3 address space, or NULL */
 	void *stack;			/* usable base, NULL for the boot thread */
 	unsigned int stack_pages;
 	int slice;			/* ticks left of the time slice */

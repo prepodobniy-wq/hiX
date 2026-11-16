@@ -9,13 +9,17 @@
 #define pr_fmt(fmt) "qubix: " fmt
 
 #include <hix/kernel.h>
+#include <hix/bootconfig.h>
 #include <hix/driver.h>
 #include <hix/rtc.h>
 #include <asm/trap.h>
 #include <aether/kalloc.h>
 #include <aether/pmm.h>
 #include <aether/sched.h>
+#include <aether/uspace.h>
 #include <aether/vm.h>
+#include <qubix/crypto.h>
+#include <qubix/initfs.h>
 #include <qubix/input.h>
 #include <qubix/libq.h>
 #include <qubix/proc.h>
@@ -23,18 +27,26 @@
 #include <qubix/tty.h>
 #include <steel/steel.h>
 #include <steel/gfxdev.h>
+#include <gantry/gantry.h>
+#include <gantry/kit.h>
+#include <gantry/tweak.h>
+#include <steel/bga.h>
 #include <hix/version.h>
 
 void steel_demo(void);
 
 /* ---- argument checking ---------------------------------------------- */
 
-static bool user_ok(const void *ptr, size_t len)
+bool qubix_user_range_ok(const void *ptr, size_t len, bool write)
 {
 	unsigned long start = (unsigned long)ptr;
 	unsigned long end = start + len;
 	unsigned long page;
+	struct thread *t = thread_current();
 
+	/* a ring 3 process may only name memory of its own address space */
+	if (t && t->uspace)
+		return uspace_range_ok(t->uspace, start, len, write);
 	if (start < PAGE_SIZE || end < start)
 		return false;
 	for (page = ALIGN_DOWN(start, PAGE_SIZE); page < end; page += PAGE_SIZE)
@@ -43,15 +55,26 @@ static bool user_ok(const void *ptr, size_t len)
 	return true;
 }
 
+/* memory the kernel will write to / only read from */
+static bool user_ok(const void *ptr, size_t len)
+{
+	return qubix_user_range_ok(ptr, len, true);
+}
+
+static bool user_rok(const void *ptr, size_t len)
+{
+	return qubix_user_range_ok(ptr, len, false);
+}
+
 /* copy a string argument into @dst; returns 0 or -errno */
 static int copy_str(char *dst, const char *src, size_t size)
 {
 	size_t i;
 
-	if (!user_ok(src, 1))
+	if (!user_rok(src, 1))
 		return -EFAULT;
 	for (i = 0; i < size; i++) {
-		if (!user_ok(src + i, 1))
+		if (!user_rok(src + i, 1))
 			return -EFAULT;
 		dst[i] = src[i];
 		if (!src[i])
@@ -123,7 +146,7 @@ static int fmt_ioreg(char *buf, size_t size)
 	for (i = 0; (d = driver_get(i)) != NULL && (size_t)len < size; i++)
 		len += snprintf(buf + len, size - len,
 				"  +-o %-10s <class %-8s level %d  %s>\n",
-				d->name, d->class, d->level,
+				d->name, d->kind, d->level,
 				driver_state_name(d->state));
 	return len;
 }
@@ -170,6 +193,10 @@ static int sysctl_text(const char *name, char *buf, size_t size)
 				AETHER_NAME, QUBIX_NAME, STEEL_NAME);
 	if (!strcmp(name, "kern.hostname"))
 		return snprintf(buf, size, "hix");
+	if (!strcmp(name, "kern.cmdline"))
+		return snprintf(buf, size, "%s", hix_boot.cmdline);
+	if (!strcmp(name, "hix.boot"))
+		return hix_bootconfig_format(buf, size);
 	if (!strcmp(name, "kern.uptime"))
 		return snprintf(buf, size, "%lu", jiffies / HZ);
 	if (!strcmp(name, "hw.ncpu"))
@@ -181,16 +208,32 @@ static int sysctl_text(const char *name, char *buf, size_t size)
 				pmm_total_count() * PAGE_SIZE);
 	if (!strcmp(name, "hw.freemem"))
 		return snprintf(buf, size, "%lu", pmm_free_count() * PAGE_SIZE);
+	if (!strcmp(name, "hw.display"))
+		return snprintf(buf, size, bga_present() ?
+				"%dx%d, bochs vbe" : "%dx%d, vga text",
+				bga_present() ? GFX_SCREEN_W : 80,
+				bga_present() ? GFX_SCREEN_H : 25);
+	if (!strcmp(name, "hix.desktop"))
+		return snprintf(buf, size, "hix Desktop (steel, Argent)");
 	if (!strcmp(name, "hix.ps"))
 		return fmt_ps(buf, size);
 	if (!strcmp(name, "hix.procs"))
 		return fmt_procs(buf, size);
 	if (!strcmp(name, "hix.devtree"))
 		return fmt_ioreg(buf, size);
+	if (!strcmp(name, "hix.registry"))
+		return gantry_format(buf, size);
+	if (!strcmp(name, "hix.tweaks"))
+		return gantry_tweak_format(buf, size);
+	if (!strcmp(name, "hix.platform"))
+		return snprintf(buf, size, "%s, %u nodes", GANTRY_NAME,
+				gantry_node_count());
 	if (!strcmp(name, "hix.irqs"))
 		return fmt_irqs(buf, size);
 	if (!strcmp(name, "hix.heap"))
 		return fmt_heap(buf, size);
+	if (!strcmp(name, "hix.crypto"))
+		return hix_crypto_format(buf, size);
 	if (!strcmp(name, "hix.dmesg"))
 		return (int)printk_log_read(buf, size);
 	return -ENOENT;
@@ -275,7 +318,7 @@ static long sys_write(int fd, const char *buf, size_t len)
 
 	if (!f)
 		return -EBADF;
-	if (len && !user_ok(buf, len))
+	if (len && !user_rok(buf, len))
 		return -EFAULT;
 	return vfs_write(f, buf, len);
 }
@@ -528,6 +571,33 @@ static long sys_steelctl(long op, long a, long b, long c)
 		return pixdev_client_set(pd, rq->idx, rq->x, rq->y, rq->w, rq->h,
 					 (const u32 *)rq->px, rq->stride);
 	}
+	case STEEL_CTL_PANEL: {
+		struct pixdev *pd = steel_gfx_pixdev();
+
+		if (!pd)
+			return -ENODEV;
+		if (!user_ok((const void *)a, sizeof(struct steel_panel)))
+			return -EFAULT;
+		pixdev_panel(pd, (const struct steel_panel *)a);
+		return 0;
+	}
+	case STEEL_CTL_FLOAT: {
+		struct pixdev *pd = steel_gfx_pixdev();
+		const struct steel_float_req *rq = (const struct steel_float_req *)a;
+
+		if (!pd)
+			return -ENODEV;
+		if (!user_ok(rq, sizeof(*rq)))
+			return -EFAULT;
+		if (!rq->cells) {
+			pixdev_float_off(pd);
+			return 0;
+		}
+		if (!user_ok(rq->cells, PIX_COLS * PIX_ROWS * sizeof(u32)))
+			return -EFAULT;
+		return pixdev_float(pd, rq->cells, rq->cx, rq->cy, rq->cw, rq->ch,
+				    rq->px, rq->py);
+	}
 	case STEEL_CTL_CLIENT_CLEAR: {
 		struct pixdev *pd = steel_gfx_pixdev();
 
@@ -552,11 +622,61 @@ static long sys_steelctl(long op, long a, long b, long c)
 
 /* ---- the dispatcher --------------------------------------------------- */
 
+/* the Kit gateway: programs reach Gantry services through one call */
+static long sys_gantry(long op, long arg, void *ubuf)
+{
+	struct kit_msg m;
+	char name[24];
+	int err;
+
+	switch (op) {
+	case GANTRY_LOOKUP:
+		/* kit_lookup() passes the service name in the second argument */
+		err = copy_str(name, (const char *)arg, sizeof(name));
+		if (err)
+			return err;
+		return gantry_service_lookup(name);
+	case GANTRY_CALL:
+		if (!user_ok(ubuf, sizeof(m)))
+			return -EFAULT;
+		memcpy(&m, ubuf, sizeof(m));
+		err = (int)gantry_service_call((int)(arg & 0xFFFF),
+					       (unsigned int)arg >> 16, &m);
+		if (err >= 0 || err == -ENOENT)
+			memcpy(ubuf, &m, sizeof(m));
+		return err;
+	}
+	return -EINVAL;
+}
+
 void qubix_syscall(struct pt_regs *r)
 {
 	long a1 = (long)r->ebx, a2 = (long)r->ecx, a3 = (long)r->edx;
 	long a4 = (long)r->esi;
 	long ret;
+
+	/* a killed process dies the next time it enters the kernel */
+	if (proc_current()->killed)
+		proc_exit(PROC_KILLED_STATUS);
+
+	/* programs in ring 3 get the calls that have been audited: every
+	 * pointer goes through user_ok/copy_str. Still closed: graphics, ports,
+	 * ioctl and reboot */
+	if (thread_current()->uspace) {
+		switch ((int)r->eax) {
+		case SYS_exit: case SYS_read: case SYS_write: case SYS_close:
+		case SYS_getpid: case SYS_getppid: case SYS_gantry:
+		case SYS_open: case SYS_lseek: case SYS_getdirentries:
+		case SYS_gettimeofday: case SYS_mkdir: case SYS_unlink:
+		case SYS_wait4: case SYS_posix_spawn: case SYS_sysctlbyname:
+		case SYS_kill: case SYS_crypto: case AE_clock_sleep:
+		case AE_swtch:
+			break;
+		default:
+			r->eax = (u32)-ENOSYS;
+			return;
+		}
+	}
 
 	switch ((int)r->eax) {
 	case SYS_exit:
@@ -582,11 +702,18 @@ void qubix_syscall(struct pt_regs *r)
 	case SYS_mkdir:
 		ret = sys_path_op((const char *)a1, vfs_mkdir);
 		break;
+	case SYS_gantry:
+		ret = sys_gantry(a1, a2, (void *)a3);
+		break;
 	case SYS_getpid:
 		ret = proc_current()->pid;
 		break;
 	case SYS_getppid:
 		ret = proc_current()->ppid;
+		break;
+	case SYS_kill:
+		ret = a2 == 0 ? (proc_exists((pid_t)a1) ? 0 : -ESRCH) :
+		      proc_kill((pid_t)a1);
 		break;
 	case SYS_ioctl:
 		ret = sys_ioctl((int)a1, a2, a3);
@@ -613,6 +740,9 @@ void qubix_syscall(struct pt_regs *r)
 	case SYS_sysctlbyname:
 		ret = sys_sysctlbyname((const char *)a1, (char *)a2,
 				       (size_t)a3);
+		break;
+	case SYS_crypto:
+		ret = qubix_sys_crypto(a1, (struct hix_crypto_req *)a2);
 		break;
 	case SYS_steelctl:
 		ret = sys_steelctl(a1, a2, a3, a4);
@@ -660,15 +790,28 @@ void qubix_syscall(struct pt_regs *r)
 		break;
 	}
 	r->eax = (u32)ret;
+	if (proc_current()->killed)
+		proc_exit(PROC_KILLED_STATUS);
 }
+
+extern const char user_initfs_start[], user_initfs_end[];
 
 void qubix_init(void)
 {
 	extern void qubix_devices_init(void);
+	int crypto;
 
 	vfs_init();
+	initfs_unpack(user_initfs_start, user_initfs_end - user_initfs_start, "/bin");
 	proc_init();
 	qubix_devices_init();
 	set_syscall_handler(qubix_syscall);
+	crypto = hix_crypto_selftest();
+	if (crypto == -ENOSYS)
+		pr_info("qubix: Rust crypto module not built in\n");
+	else if (crypto)
+		pr_warn("qubix: Rust crypto selftest failed (%d)\n", crypto);
+	else
+		pr_info("qubix: Rust crypto up (ChaCha20-Poly1305)\n");
 	pr_info("qubix up: vfs, processes, %d programs\n", qprogs_count);
 }

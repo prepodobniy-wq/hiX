@@ -29,7 +29,7 @@ enum driver_state {
 
 struct hix_driver {
 	const char *name;	/* "pit", "ps2kbd" ... */
-	const char *class;	/* "timer", "input", "display", ... */
+	const char *kind;	/* "timer", "input", "display", ... */
 	int level;
 	int (*probe)(void);	/* 0: hardware present */
 	int (*start)(void);	/* 0: success */

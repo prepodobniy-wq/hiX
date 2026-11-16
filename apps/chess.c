@@ -4,7 +4,7 @@
  * display). Click a piece and then a square, or drag it. The computer plays
  * the other side at one of four levels; Game/Undo takes moves back.
  *
- * The rules and the computer player are in chess_rules.c; this file is the
+ * The rules and the computer player are in chess_rules.cpp; this file is the
  * board, the pieces, the side panel and the mouse.
  */
 #include <hix/kernel.h>

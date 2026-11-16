@@ -1,6 +1,12 @@
 build/
+dist/
 tests/build/
+rust/hix-core/target/
+.rust-sysroot/
 *.o
 *.d
+*.a
 *.iso
 qemu.log
+__pycache__/
+*.pyc

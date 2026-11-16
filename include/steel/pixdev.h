@@ -17,6 +17,7 @@
 
 #include <steel/steel.h>
 #include <steel/gfx.h>
+#include <steel/panel.h>
 
 #define PIX_COLS	80
 #define PIX_ROWS	25
@@ -39,21 +40,46 @@ struct pix_client {
 	int dx0, dy0, dx1, dy1;		/* dirty rectangle, client pixels */
 };
 
+#define PIX_MAX_H	1200		/* rows the dirty-span table can hold */
+#define PIX_FLOAT_SHADOW 6		/* soft shadow around a floating window */
+#define PIX_SPRITE_PX	(PIX_COLS * PIX_CELL_W * PIX_ROWS * PIX_CELL_H)
+
 struct pixdev {
+	/*
+	 * Everything is drawn into @fb, a clean copy of the desktop in plain
+	 * memory. Reading and alpha-blending in video memory is very slow, so
+	 * the real screen only ever gets whole spans copied to it (pix_flush),
+	 * with the floating window and the pointer laid over the copy.
+	 */
 	struct gfx_canvas fb;
+	struct gfx_canvas screen;	/* the real framebuffer */
+	s16 span0[PIX_MAX_H], span1[PIX_MAX_H];	/* dirty x range per row */
 	int off_x, off_y;		/* pixel position of cell (0, 0) */
+	/* a window being dragged: a pixel sprite at an exact position */
+	bool fl_on, fl_redo;
+	int fl_x, fl_y, fl_w, fl_h;	/* pixels on screen */
+	int fl_cx, fl_cy, fl_cw, fl_ch;	/* the cells it was drawn from */
+	u32 *sprite;
+	steel_cell_t fl_cells[PIX_COLS * PIX_ROWS];
 	steel_cell_t prev[PIX_COLS * PIX_ROWS];
 	bool have_prev;
 	struct pix_client client[PIX_CLIENTS];
+	struct steel_panel panel;
+	bool have_panel;
 	int cur_x, cur_y;
-	bool cur_visible, under_valid;
-	int under_x, under_y;
-	u32 under[PIX_CUR_W * PIX_CUR_H];
+	bool cur_visible;
 };
 
-/* @fb is the whole screen; the cell grid is centred in it */
-void pixdev_init(struct pixdev *d, const struct gfx_canvas *fb);
+/*
+ * @fb is the whole screen; the cell grid is centred in it, below the top bar.
+ * @back is memory for a copy of it (fb->w * fb->h pixels), @sprite for the
+ * floating window (PIX_SPRITE_PX pixels).
+ */
+void pixdev_init(struct pixdev *d, const struct gfx_canvas *fb, u32 *back,
+		 u32 *sprite);
 void pixdev_present(struct pixdev *d, const steel_cell_t *cells);
+/* draw the panels if they differ from what is on screen */
+void pixdev_panel(struct pixdev *d, const struct steel_panel *p);
 void pixdev_cursor(struct pixdev *d, int x, int y, bool visible);
 /* geometry for input: where the grid sits and how big a cell is */
 static inline int pixdev_off_x(const struct gfx_canvas *fb)
@@ -62,8 +88,19 @@ static inline int pixdev_off_x(const struct gfx_canvas *fb)
 }
 static inline int pixdev_off_y(const struct gfx_canvas *fb)
 {
-	return (fb->h - PIX_ROWS * PIX_CELL_H) / 2;
+	/* the top bar is 24 pixels; what is left below the grid is the taskbar */
+	return PANEL_TOP_H;
 }
+
+/*
+ * Show one window at an exact pixel position instead of its cell position:
+ * the smooth way to drag. @cells is the screen with only that window drawn;
+ * the rectangle (cx, cy, cw, ch) of it becomes the sprite, which is shown at
+ * (px, py). The cells given to pixdev_present() must not contain the window.
+ */
+int pixdev_float(struct pixdev *d, const steel_cell_t *cells, int cx, int cy,
+		 int cw, int ch, int px, int py);
+void pixdev_float_off(struct pixdev *d);
 
 int pixdev_client_set(struct pixdev *d, int idx, int x, int y, int w, int h,
 		      const u32 *px, int stride);

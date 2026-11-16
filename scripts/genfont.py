@@ -67,7 +67,8 @@ def main(path):
     # 2/3. proportional UI fonts, ASCII 32..126
     for name, ttf, size, h, base, maxw in (
             ("ui", "DejaVuSans.ttf", 14, 18, 14, 14),
-            ("uib", "DejaVuSans-Bold.ttf", 20, 26, 20, 20)):
+            ("uib", "DejaVuSans-Bold.ttf", 20, 26, 20, 20),
+            ("ubs", "DejaVuSans-Bold.ttf", 12, 16, 12, 12)):
         f = ImageFont.truetype(DEJAVU + ttf, size)
         alpha = bytearray()
         adv = bytearray()
@@ -102,7 +103,9 @@ def main(path):
     out.write("const struct gfx_font gfx_font_ui = {\n"
               "\t14, 18, 32, 95, gfx_font_ui_alpha, gfx_font_ui_adv, 14\n};\n\n")
     out.write("const struct gfx_font gfx_font_uib = {\n"
-              "\t20, 26, 32, 95, gfx_font_uib_alpha, gfx_font_uib_adv, 20\n};\n")
+              "\t20, 26, 32, 95, gfx_font_uib_alpha, gfx_font_uib_adv, 20\n};\n\n")
+    out.write("const struct gfx_font gfx_font_ubs = {\n"
+              "\t12, 16, 32, 95, gfx_font_ubs_alpha, gfx_font_ubs_adv, 12\n};\n")
     out.close()
 
 

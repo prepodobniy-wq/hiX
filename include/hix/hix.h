@@ -15,11 +15,11 @@
 #define _HIX_HIX_H
 
 #include <hix/types.h>
+#include <hix/version.h>
 
-#define HIX_NAME	"hix"
-#define HIX_VERSION	"0.2.0"
-#define HIX_CODENAME	"hi kernel"
-#define HIX_TAGLINE	"hi is not unix"
+/* legacy aliases: include/hix/version.h is the single source of truth */
+#define HIX_VERSION	HIX_RELEASE
+#define HIX_TAGLINE	HIX_EXPAND
 #define HIX_ARCH	"i386"
 
 #define HZ		100

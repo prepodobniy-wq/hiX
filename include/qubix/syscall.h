@@ -11,6 +11,8 @@
 #ifndef _QUBIX_SYSCALL_H
 #define _QUBIX_SYSCALL_H
 
+#include <hix/types.h>
+
 /* process calls */
 #define SYS_exit		1
 #define SYS_read		3
@@ -20,6 +22,7 @@
 #define SYS_wait4		7
 #define SYS_unlink		10
 #define SYS_getpid		20
+#define SYS_kill		37	/* (pid, sig): sig 0 only asks if pid exists */
 #define SYS_getppid		39
 #define SYS_ioctl		54	/* (fd, request, arg): tty modes */
 #define SYS_reboot		55
@@ -30,6 +33,7 @@
 #define SYS_posix_spawn		244	/* simplified: (command line) */
 #define SYS_sysctlbyname	274	/* (name, buf, buflen) -> text */
 #define SYS_steelctl		500	/* hix: graphics control */
+#define SYS_crypto		601	/* (op, struct hix_crypto_req *) */
 
 /* port traps */
 #define AE_reply_port		(-26)
@@ -66,6 +70,15 @@
 #define STEEL_CTL_CLIENT_SET	8	/* (struct steel_client_req *) */
 #define STEEL_CTL_CLIENT_CLEAR	9	/* (index) */
 #define STEEL_CTL_CLIENT_DIRTY	10	/* (struct steel_client_req *) */
+#define STEEL_CTL_PANEL		11	/* (struct steel_panel *): top and bottom bar */
+#define STEEL_CTL_FLOAT		12	/* (struct steel_float_req *): sprite window */
+
+/* the window being dragged: shown at a pixel position, see pixdev_float() */
+struct steel_float_req {
+	s32 px, py;			/* where it is shown, pixels */
+	s32 cx, cy, cw, ch;		/* its rectangle in @cells */
+	const u32 *cells;		/* the screen with only this window; NULL = off */
+};
 
 /*
  * GRAB takes a flag: 1 asks for the pixel display. The result is 0 for the
@@ -90,5 +103,8 @@ struct timeval_hix {
 struct pt_regs;
 void qubix_init(void);
 void qubix_syscall(struct pt_regs *regs);
+
+/* shared by the syscall table and the crypto bridge */
+bool qubix_user_range_ok(const void *ptr, size_t len, bool write);
 
 #endif /* _QUBIX_SYSCALL_H */

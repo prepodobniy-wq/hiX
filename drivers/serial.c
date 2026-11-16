@@ -8,6 +8,8 @@
 #include <hix/kernel.h>
 #include <hix/driver.h>
 #include <hix/console.h>
+#include <hix/serial.h>
+#include <hix/spinlock.h>
 #include <asm/io.h>
 #include <asm/trap.h>
 #include <qubix/tty.h>
@@ -23,6 +25,9 @@
 #define LSR_TX_EMPTY	0x20
 #define COM1_IRQ	4
 
+static bool serial_ready;
+static DEFINE_SPINLOCK(serial_tx_lock);
+
 static void serial_putc(char c)
 {
 	int spin = 100000;
@@ -32,16 +37,33 @@ static void serial_putc(char c)
 	outb(COM1 + REG_DATA, (u8)c);
 }
 
-static void serial_write(struct console *con, int level, const char *s,
-			 size_t n)
+static void serial_emit(const char *s, size_t n)
 {
-	(void)con;
-	(void)level;
+	unsigned long flags;
+
+	spin_lock_irqsave(&serial_tx_lock, flags);
 	while (n--) {
 		if (*s == '\n')
 			serial_putc('\r');
 		serial_putc(*s++);
 	}
+	spin_unlock_irqrestore(&serial_tx_lock, flags);
+}
+
+static void serial_write(struct console *con, int level, const char *s,
+			 size_t n)
+{
+	(void)con;
+	(void)level;
+	serial_emit(s, n);
+}
+
+/* the tty mirror: shell output, prompt and echo all reach COM1 */
+void serial_tty_write(const char *s, size_t n)
+{
+	if (!serial_ready)
+		return;
+	serial_emit(s, n);
 }
 
 static struct console serial_console = {
@@ -84,6 +106,7 @@ static int serial_probe(void)
 
 static int serial_start(void)
 {
+	serial_ready = true;
 	register_console(&serial_console);
 	if (request_irq(COM1_IRQ, serial_irq, "serial", NULL) == 0)
 		outb(COM1 + REG_IER, 0x01);	/* interrupt on received data */
@@ -92,7 +115,7 @@ static int serial_start(void)
 
 static struct hix_driver serial_driver = {
 	.name = "ns16550",
-	.class = "serial",
+	.kind = "serial",
 	.level = DRV_LEVEL_CONSOLE,
 	.probe = serial_probe,
 	.start = serial_start,

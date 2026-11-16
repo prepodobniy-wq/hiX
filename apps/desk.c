@@ -15,6 +15,7 @@
 #include <desk/desk.h>
 #include <steel/theme.h>
 #include <steel/pixdev.h>
+#include <steel/panel.h>
 
 #define BORDER_SLOTS	2		/* windows kept free for dialogs */
 #define DBLCLICK_MS	500
@@ -50,7 +51,16 @@ static int capture_id;
 static struct {
 	bool active;
 	int id, dx, dy;
+	/* smooth drag: the window follows the pointer pixel by pixel */
+	bool floating;
+	int pdx, pdy;			/* pointer offset inside the window, pixels */
+	int fx, fy;			/* where the sprite is shown, pixels */
 } drag;
+/* the dragged window is composed on a surface of its own */
+static steel_cell_t fl_cells[DESK_W * DESK_H];
+static struct steel_surface fl_surf;
+static bool fl_have, fl_shown;
+static int fl_x, fl_y, fl_w, fl_h;	/* its frame, in cells */
 static struct {
 	unsigned long t;
 	int x, y, id;
@@ -166,11 +176,18 @@ static void apply_geometry(struct win *w)
 	}
 }
 
+#define SIDE_GRIP	4	/* cells of a window that must stay on screen */
+
 static void clamp_position(struct win *w)
 {
 	int fw = w->cw + 2, fh = w->ch + 2 + menu_rows(w);
 
-	w->x = max(0, min(w->x, DESK_W - fw));
+	if (w->pix || w->state == WS_MAX || (w->app->flags & APP_ROOT)) {
+		w->x = max(0, min(w->x, DESK_W - fw));
+	} else {
+		/* a window may leave the screen at the sides, but not all of it */
+		w->x = max(SIDE_GRIP - fw, min(w->x, DESK_W - SIDE_GRIP));
+	}
 	w->y = max(0, min(w->y, DESK_H - fh));
 }
 
@@ -647,7 +664,7 @@ static void show_about(void)
 	char text[160];
 
 	snprintf(text, sizeof(text),
-		 "hix Desktop 0.3\n\n"
+		 "hix Desktop " HIX_RELEASE "\n\n"
 		 "A classic windowed shell for the steel display.\n"
 		 "Kernel: %s %s  (aether + qubix + steel)", HIX_NAME,
 		 HIX_RELEASE);
@@ -788,19 +805,19 @@ static void draw_frame(const struct win *w, bool active)
 	}
 }
 
-static void draw_dropdown(const struct win *w)
+/* a drop-down box; @w is the window the menu belongs to, NULL for the panel */
+static void draw_menu_box(const struct win *w, const struct menu *m, int dx,
+			  int dy, int dw, int dh, int sel)
 {
-	const struct menu *m = menu_of(w, mn.menu);
-	int dx, dy, dw, dh, i;
+	int i;
 
-	menu_geometry(w, &dx, &dy, &dw, &dh);
 	steel_rect(&screen, dx, dy, dw, dh, ' ', A_WIN);
 	steel_box(&screen, dx, dy, dw, dh, STEEL_BOX_SINGLE, A_WIN);
 	for (i = 0; i < m->nitems; i++) {
 		const struct menu_item *it = &m->items[i];
 		int row = dy + 1 + i;
-		bool usable = item_usable(w, it);
-		u8 attr = i == mn.item ? A_SEL : (usable ? A_WIN : A_DIM);
+		bool usable = w ? item_usable(w, it) : it->id != 0;
+		u8 attr = i == sel ? A_SEL : (usable ? A_WIN : A_DIM);
 
 		if (!it->id) {
 			steel_hline(&screen, dx + 1, row, dw - 2, 0xC4, A_WIN);
@@ -812,10 +829,9 @@ static void draw_dropdown(const struct win *w)
 			steel_puts(&screen, dx + dw - 2 - (int)strlen(it->accel),
 				   row, it->accel, attr);
 		steel_tag(&screen, dx + 1, row, dw - 2, 1, TR_DROP,
-			  i == mn.item ? DP_SELECTED : (usable ? DP_ITEM : DP_DISABLED));
+			  i == sel ? DP_SELECTED : (usable ? DP_ITEM : DP_DISABLED));
 	}
 	/* theme: thin outline and a shadow */
-	steel_tag(&screen, dx, dy, dw, dh, TR_FRAME, FA_FLAT);
 	steel_tag(&screen, dx, dy, dw, 1, TR_FRAME, FA_FLAT | FS_T);
 	steel_tag(&screen, dx, dy + dh - 1, dw, 1, TR_FRAME, FA_FLAT | FS_B);
 	steel_tag(&screen, dx, dy, 1, dh, TR_FRAME, FA_FLAT | FS_L);
@@ -831,6 +847,14 @@ static void draw_dropdown(const struct win *w)
 				  DP_SEPARATOR);
 	steel_shade(&screen, dx + dw, dy + 1, 1, dh, TR_SHADOW_R);
 	steel_shade(&screen, dx + 1, dy + dh, dw, 1, TR_SHADOW_B);
+}
+
+static void draw_dropdown(const struct win *w)
+{
+	int dx, dy, dw, dh;
+
+	menu_geometry(w, &dx, &dy, &dw, &dh);
+	draw_menu_box(w, menu_of(w, mn.menu), dx, dy, dw, dh, mn.item);
 }
 
 static void minimized_origin(const struct win *w, int *ix, int *iy)
@@ -959,12 +983,312 @@ bool desk_pointer_px(const struct win *w, int *x, int *y)
 	return true;
 }
 
+/* ---- the panels -------------------------------------------------------- */
+
+/*
+ * The pixel display has a bar above the grid and one below it (steel/panel.h).
+ * The top bar holds two global menus, Apps and Computer; the bottom bar one
+ * button per window. The drop-downs are ordinary cells, drawn over the grid,
+ * so windows and menus stack the way they always did.
+ */
+enum {
+	PM_APP = 2000,		/* + index in desk_apps[] */
+	PM_HUB = 2900, PM_SYSINFO, PM_TASKS, PM_TERM, PM_ABOUT, PM_RESTART,
+	PM_HALT, PM_QUIT,
+};
+
+#define PM_NMENUS	2
+#define PM_MAX_APPS	16
+
+static struct menu_item apps_items[PM_MAX_APPS];
+static const struct menu_item comp_items[] = {
+	{ "Hub", PM_HUB, NULL },
+	{ "System Info", PM_SYSINFO, NULL },
+	{ "Task List", PM_TASKS, NULL },
+	{ "Terminal", PM_TERM, NULL },
+	{ "", 0, NULL },
+	{ "About hix Desktop...", PM_ABOUT, NULL },
+	{ "", 0, NULL },
+	{ "Restart", PM_RESTART, NULL },
+	{ "Shut Down", PM_HALT, NULL },
+	{ "Exit Desktop", PM_QUIT, "Alt+F4" },
+};
+static struct menu pmenus[PM_NMENUS] = {
+	{ "Apps", apps_items, 0 },
+	{ "Computer", comp_items, ARRAY_SIZE(comp_items) },
+};
+static struct {
+	bool open;
+	int menu, item;
+} pmn;
+static struct steel_panel panel;
+static int task_win[PANEL_TASKS];
+
+static void panel_init(void)
+{
+	int i, n = 0;
+
+	for (i = 0; i < desk_apps_count && n < PM_MAX_APPS; i++) {
+		const struct app *a = desk_apps[i];
+
+		if (a == &app_hub || (a->flags & (APP_DIALOG | APP_ACTION)))
+			continue;
+		apps_items[n].label = a->title;
+		apps_items[n].id = PM_APP + i;
+		apps_items[n].accel = NULL;
+		n++;
+	}
+	pmenus[0].nitems = n;
+	memset(&panel, 0, sizeof(panel));
+	panel.open = -1;
+	pmn.open = false;
+}
+
+static int pix_w(void)
+{
+	return 2 * pix_off_x + DESK_W * PIX_CELL_W_;
+}
+
+static void pm_geometry(int *dx, int *dy, int *dw, int *dh)
+{
+	const struct menu *m = &pmenus[pmn.menu];
+	int i, width = 0;
+
+	for (i = 0; i < m->nitems; i++) {
+		int len = (int)strlen(m->items[i].label);
+
+		if (m->items[i].accel)
+			len += 3 + (int)strlen(m->items[i].accel);
+		width = max(width, len);
+	}
+	*dw = width + 4;
+	*dh = m->nitems + 2;
+	*dx = pixel_mode ? (panel.menu[pmn.menu].x - pix_off_x) / PIX_CELL_W_ :
+	      pmn.menu * 8;
+	*dy = 0;
+	*dx = max(0, min(*dx, DESK_W - *dw));
+}
+
+static void pm_step(int dir)
+{
+	const struct menu *m = &pmenus[pmn.menu];
+	int i, n = m->nitems;
+
+	for (i = 1; i <= n; i++) {
+		int k = ((pmn.item + dir * i) % n + n) % n;
+
+		if (m->items[k].id) {
+			pmn.item = k;
+			return;
+		}
+	}
+}
+
+static void pm_open(int menu, bool by_key)
+{
+	pmn.open = true;
+	pmn.menu = menu;
+	pmn.item = -1;
+	if (by_key)
+		pm_step(1);
+}
+
+static void do_restart(struct win *w)
+{
+	(void)w;
+	if (be->power) {
+		be->power(false);
+		return;
+	}
+	desk_quit();
+}
+
+static void do_halt(struct win *w)
+{
+	(void)w;
+	if (be->power) {
+		be->power(true);
+		return;
+	}
+	desk_quit();
+}
+
+static void launch_named(const char *name)
+{
+	const struct app *a = desk_find_app(name);
+
+	if (a)
+		desk_launch(a, NULL);
+}
+
+static void pm_execute(void)
+{
+	int id = pmenus[pmn.menu].items[pmn.item].id;
+
+	pmn.open = false;
+	if (id >= PM_APP && id < PM_APP + desk_apps_count) {
+		desk_launch(desk_apps[id - PM_APP], NULL);
+		return;
+	}
+	switch (id) {
+	case PM_HUB:
+		desk_launch(&app_hub, NULL);
+		break;
+	case PM_SYSINFO:
+		launch_named("sysinfo");
+		break;
+	case PM_TASKS:
+		launch_named("tasks");
+		break;
+	case PM_TERM:
+		launch_named("term");
+		break;
+	case PM_ABOUT:
+		show_about();
+		break;
+	case PM_RESTART:
+		desk_confirm(NULL, "Restart", "Restart the computer?", do_restart);
+		break;
+	case PM_HALT:
+		desk_confirm(NULL, "Shut Down", "Turn the computer off?", do_halt);
+		break;
+	case PM_QUIT:
+		desk_quit();
+		break;
+	default:
+		break;
+	}
+}
+
+static void pm_key(int key)
+{
+	switch (key) {
+	case 27:
+	case KEY_F(9):
+		pmn.open = false;
+		break;
+	case KEY_LEFT:
+	case KEY_RIGHT:
+		pmn.menu = (pmn.menu + (key == KEY_LEFT ? PM_NMENUS - 1 : 1)) %
+			   PM_NMENUS;
+		pmn.item = -1;
+		pm_step(1);
+		break;
+	case KEY_DOWN:
+		pm_step(1);
+		break;
+	case KEY_UP:
+		pm_step(-1);
+		break;
+	case '\n':
+		if (pmn.item >= 0)
+			pm_execute();
+		break;
+	default:
+		break;
+	}
+}
+
+/* what the bars show right now */
+static void update_panel(void)
+{
+	struct win *top = top_visible();
+	int i, n = 0, x = 36;
+	long t = be->wall_time ? be->wall_time() : -1;
+
+	for (i = 0; i < PM_NMENUS; i++) {
+		strlcpy(panel.menu[i].label, pmenus[i].title,
+			sizeof(panel.menu[i].label));
+		panel.menu[i].x = (s16)x;
+		panel.menu[i].w = (s16)panel_menu_width(pmenus[i].title);
+		x += panel.menu[i].w;
+	}
+	panel.nmenus = PM_NMENUS;
+	panel.open = pmn.open ? pmn.menu : -1;
+
+	for (i = 0; i < DESK_MAX_WINDOWS && n < PANEL_TASKS; i++) {
+		const struct win *w = &wins[i];
+
+		if (!w->used || w->closing || (w->app->flags & APP_DIALOG))
+			continue;
+		strlcpy(panel.task[n].title, w->title, sizeof(panel.task[n].title));
+		panel.task[n].icon = (u8)theme_icon_id(w->app->name);
+		panel.task[n].flags = (u8)((w == top ? PT_ACTIVE : 0) |
+					   (w->state == WS_MIN ? PT_MIN : 0));
+		task_win[n++] = w->id;
+	}
+	panel.ntasks = n;
+	if (t >= 0)
+		snprintf(panel.clock, sizeof(panel.clock), "%02d:%02d",
+			 (int)(t / 3600 % 24), (int)(t / 60 % 60));
+	else
+		panel.clock[0] = 0;
+}
+
+/* the mouse and the panels; true when the event was theirs */
+static bool panel_mouse(bool pressed, bool left_down)
+{
+	int hit = PANEL_HIT_NONE;
+
+	if (pixel_mode)
+		hit = panel_hit(pix_w(), &panel, mpx, mpy);
+
+	if (pmn.open) {
+		int dx, dy, dw, dh;
+
+		pm_geometry(&dx, &dy, &dw, &dh);
+		if (hit >= PANEL_HIT_MENU && hit < PANEL_HIT_MENU + panel.nmenus) {
+			int m = hit - PANEL_HIT_MENU;
+
+			if (pressed && m == pmn.menu) {
+				pmn.open = false;
+			} else if (m != pmn.menu) {	/* slide to the neighbour */
+				pmn.menu = m;
+				pmn.item = -1;
+			}
+		} else if (hit == PANEL_HIT_NONE && mx > dx && mx < dx + dw - 1 &&
+			   my > dy && my < dy + dh - 1) {
+			int item = my - dy - 1;
+
+			if (pmenus[pmn.menu].items[item].id) {
+				pmn.item = item;
+				if (pressed)
+					pm_execute();
+			}
+		} else if (pressed) {
+			pmn.open = false;
+		}
+		return true;
+	}
+	if (hit == PANEL_HIT_NONE)
+		return false;
+	if (!pressed || !left_down || modal_window())
+		return true;
+	if (hit >= PANEL_HIT_TASK) {
+		struct win *w = hit - PANEL_HIT_TASK < panel.ntasks ?
+			desk_find(task_win[hit - PANEL_HIT_TASK]) : NULL;
+
+		if (!w)
+			return true;
+		if (w->state == WS_MIN)
+			restore_win(w);
+		else if (w == top_visible())
+			set_state(w, WS_MIN);
+		else
+			raise_win(w);
+	} else if (hit >= PANEL_HIT_MENU) {
+		pm_open(hit - PANEL_HIT_MENU, false);
+	}
+	return true;
+}
+
 static void compose(void)
 {
 	struct win *top = top_visible();
 	bool used[PIX_CLIENTS] = { false };
 	int i;
 
+	fl_have = false;
 	steel_fill(&screen, ' ', A_DESKTOP);
 	for (i = 0; i < DESK_MAX_WINDOWS; i++)
 		if (wins[i].used && !wins[i].closing && wins[i].state == WS_MIN)
@@ -979,6 +1303,31 @@ static void compose(void)
 		steel_fill(&w->client, ' ', A_WIN);
 		if (w->app->paint)
 			w->app->paint(w, &w->client);
+		if (drag.active && drag.floating && w->id == drag.id) {
+			/* not on the desktop: on a surface that becomes a sprite */
+			struct steel_surface desk = screen;
+
+			memset(fl_cells, 0, sizeof(fl_cells));
+			steel_surface_init(&fl_surf, DESK_W, DESK_H, fl_cells);
+			int wx = w->x, wy = w->y;
+
+			/* drawn at the corner: the sprite does not care where it is */
+			w->x = w->y = 0;
+			screen = fl_surf;
+			draw_frame(w, true);
+			win_geom(w, &x, &y, &fw, &fh);
+			steel_blit(&screen, x + 1, y + 1 + menu_rows(w), &w->client, 0, 0,
+				   w->client.w, w->client.h);
+			screen = desk;
+			w->x = wx;
+			w->y = wy;
+			fl_have = true;
+			fl_x = x;
+			fl_y = y;
+			fl_w = fw;
+			fl_h = fh;
+			continue;
+		}
 		draw_frame(w, w == top);
 		win_geom(w, &x, &y, &fw, &fh);
 		if (pixel_mode && w->pix)
@@ -993,6 +1342,13 @@ static void compose(void)
 
 		if (w)
 			draw_dropdown(w);
+	}
+
+	if (pmn.open) {
+		int dx, dy, dw, dh;
+
+		pm_geometry(&dx, &dy, &dw, &dh);
+		draw_menu_box(NULL, &pmenus[pmn.menu], dx, dy, dw, dh, pmn.item);
 	}
 
 	if (mouse_seen && !pixel_mode) {	/* the pointer: the cell, inverted */
@@ -1110,8 +1466,16 @@ static void dispatch_key(const struct input_event *ev)
 	int key = ev->key;
 	u8 mods = ev->mods;
 
+	if (pmn.open) {
+		pm_key(key);
+		return;
+	}
 	if (mn.active) {
 		menu_key(key, mods);
+		return;
+	}
+	if (key == KEY_F(9) && !modal) {
+		pm_open(0, true);
 		return;
 	}
 	if (modal)
@@ -1259,14 +1623,32 @@ static void dispatch_mouse(const struct input_event *ev)
 		mouse_in_menu(ev, pressed);
 		return;
 	}
+	if (!drag.active && !capture_id && panel_mouse(pressed, left_down))
+		return;
 	if (drag.active) {
 		w = desk_find(drag.id);
 		if (!w || !(mbuttons & MOUSE_LEFT)) {
 			drag.active = false;
 		} else {
-			w->x = mx - drag.dx;
-			w->y = my - drag.dy;
-			clamp_position(w);
+			if (drag.floating) {
+				int rx, ry;
+
+				drag.fx = mpx - drag.pdx;
+				drag.fy = mpy - drag.pdy;
+				rx = (drag.fx - pix_off_x + PIX_CELL_W_ / 2) / PIX_CELL_W_;
+				ry = (drag.fy - pix_off_y + PIX_CELL_H_ / 2) / PIX_CELL_H_;
+				w->x = rx;		/* the cell it will snap to */
+				w->y = max(ry, 0);
+				clamp_position(w);
+				if (w->x != rx)
+					drag.fx = pix_off_x + w->x * PIX_CELL_W_;
+				if (w->y != ry)
+					drag.fy = pix_off_y + w->y * PIX_CELL_H_;
+			} else {
+				w->x = mx - drag.dx;
+				w->y = my - drag.dy;
+				clamp_position(w);
+			}
 		}
 		return;
 	}
@@ -1335,6 +1717,11 @@ static void dispatch_mouse(const struct input_event *ev)
 			drag.id = w->id;
 			drag.dx = mx - w->x;
 			drag.dy = my - w->y;
+			drag.floating = pixel_mode && be->float_win && !w->pix;
+			drag.pdx = mpx - (pix_off_x + w->x * PIX_CELL_W_);
+			drag.pdy = mpy - (pix_off_y + w->y * PIX_CELL_H_);
+			drag.fx = pix_off_x + w->x * PIX_CELL_W_;
+			drag.fy = pix_off_y + w->y * PIX_CELL_H_;
 		}
 		break;
 	case H_MENUBAR:
@@ -1417,9 +1804,12 @@ void desk_run(const struct desk_backend *backend, const char *start)
 	memset(wins, 0, sizeof(wins));
 	nz = 0;
 	mn.active = false;
+	panel_init();
 	capture_id = 0;
 	drag.active = false;
 	mouse_seen = false;
+	mbuttons = 0;
+	fl_shown = false;
 	steel_surface_init(&screen, DESK_W, DESK_H, screen_cells);
 
 	desk_launch(&app_hub, NULL);
@@ -1432,6 +1822,18 @@ void desk_run(const struct desk_backend *backend, const char *start)
 
 	running = true;
 	compose();
+	update_panel();
+	if (pixel_mode && be->float_win) {
+		if (fl_have) {
+			be->float_win(fl_cells, fl_x, fl_y, fl_w, fl_h, drag.fx, drag.fy);
+			fl_shown = true;
+		} else if (fl_shown) {
+			be->float_win(NULL, 0, 0, 0, 0, 0, 0);
+			fl_shown = false;
+		}
+	}
+	if (pixel_mode && be->panel)
+		be->panel(&panel);
 	be->present(screen.cells, DESK_W, DESK_H);
 
 	while (running) {
@@ -1449,7 +1851,19 @@ void desk_run(const struct desk_backend *backend, const char *start)
 		run_ticks();
 		reap();
 		compose();
-		be->present(screen.cells, DESK_W, DESK_H);
+		update_panel();
+	if (pixel_mode && be->float_win) {
+		if (fl_have) {
+			be->float_win(fl_cells, fl_x, fl_y, fl_w, fl_h, drag.fx, drag.fy);
+			fl_shown = true;
+		} else if (fl_shown) {
+			be->float_win(NULL, 0, 0, 0, 0, 0, 0);
+			fl_shown = false;
+		}
+	}
+	if (pixel_mode && be->panel)
+		be->panel(&panel);
+	be->present(screen.cells, DESK_W, DESK_H);
 	}
 
 	for (i = 0; i < DESK_MAX_WINDOWS; i++)

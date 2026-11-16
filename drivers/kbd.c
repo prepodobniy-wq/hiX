@@ -141,7 +141,7 @@ static int kbd_start(void)
 
 static struct hix_driver kbd_driver = {
 	.name = "ps2kbd",
-	.class = "input",
+	.kind = "input",
 	.level = DRV_LEVEL_INPUT,
 	.probe = kbd_probe,
 	.start = kbd_start,

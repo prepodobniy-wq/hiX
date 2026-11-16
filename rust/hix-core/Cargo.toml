@@ -1,0 +1,23 @@
+[package]
+name = "hix-core"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+description = "no_std Rust modules for the hix kernel (ring 0)"
+
+[lib]
+name = "hix_rust"
+crate-type = ["staticlib", "rlib"]
+
+# `kernel` selects the panic handler that reports to the hix kernel. The
+# kernel build enables it; host tests and the Python harness do not.
+[features]
+default = []
+kernel = []
+
+# No dependencies on purpose: the kernel image must be reproducible offline.
+[dependencies]
+
+[profile.release]
+panic = "abort"
+opt-level = 2

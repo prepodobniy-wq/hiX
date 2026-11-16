@@ -51,24 +51,96 @@ u32 lerp(u32 a, u32 b, unsigned int t)			/* t: 0..255 */
 
 /* ---- the wallpaper ---------------------------------------------------- */
 
+u32 hash2(int x, int y)
+{
+	u32 h = (u32)x * 374761393u + (u32)y * 668265263u;
+
+	h = (h ^ (h >> 13)) * 1274126177u;
+	return h ^ (h >> 16);
+}
+
+/* the horizon: y of the top of the land at column x */
+int horizon(int x)
+{
+	int h = 612;
+
+	if (x > 190 && x < 560) {			/* the big mesa, with steps */
+		int edge = x < 375 ? x - 190 : 560 - x;
+
+		h = 552;
+		if (edge < 34)
+			h += (34 - edge) * 28 / 34;
+		if (x > 430 && x < 470)
+			h -= 6;
+	} else if (x >= 560 && x < 700) {		/* a long low ridge */
+		h = 590 + (x - 560) / 12;
+	} else if (x > 760 && x < 880) {		/* a second butte */
+		int edge = x < 820 ? x - 760 : 880 - x;
+
+		h = 580 + max(0, 30 - edge) * 32 / 30;
+	} else if (x <= 190) {
+		h = 606 - x / 24;
+	}
+	return h;
+}
+
 u32 wall_px(int x, int y)
 {
-	constexpr u32 top_left = rgb(26, 74, 102);
-	constexpr u32 bottom_right = rgb(64, 146, 146);
-	int t = (x * 256 / 1024 + y * 256 / 768) / 2;
+	constexpr u32 sky_top = rgb(6, 8, 34);
+	constexpr u32 sky_low = rgb(46, 44, 120);
+	constexpr u32 ridge = rgb(14, 14, 44);
+	constexpr u32 sand = rgb(24, 30, 92);
+	int hz = horizon(x);
 	u32 c;
 
-	if (t < 0)
-		t = 0;
-	if (t > 255)
-		t = 255;
-	c = lerp(top_left, bottom_right, (unsigned int)t);
-	/* a faint lattice of diamonds, 48 pixels apart */
-	if (((x + y) % 48) == 0 || ((x - y + 4800) % 48) == 0)
-		c = lerp(c, LIGHT, 18);
-	/* a gentle shade towards the bottom, where the minimised icons sit */
-	if (y > 640)
-		c = lerp(c, rgb(0, 20, 30), (unsigned int)((y - 640) * 40 / 128));
+	if (y >= hz) {
+		/* the land: deep blue, a lighter band near the front, a few rocks */
+		c = lerp(ridge, sand, (unsigned int)min(255, (y - hz) * 8));
+		if (y > 690)
+			c = lerp(c, rgb(34, 42, 112), (unsigned int)((y - 690) * 3));
+		if (y > 640 && y < 700) {
+			static const short rx[5] = { 90, 250, 560, 700, 960 };
+			static const short ry[5] = { 676, 690, 664, 686, 672 };
+			int i;
+
+			for (i = 0; i < 5; i++) {
+				int dx = x - rx[i], dy = (y - ry[i]) * 3;
+
+				if (dx * dx + dy * dy < 15 * 15)
+					c = lerp(c, rgb(40, 50, 128), 200);
+			}
+		}
+		return c;
+	}
+
+	{
+		/* the sky: darker overhead, a violet glow towards the horizon */
+		int t = y * 255 / 620;
+		int d = x * 3 + y * 2 - 2300;		/* distance from the milky band */
+		u32 h = hash2(x, y);
+		int density = d > -260 && d < 260 ? 4 : 1;	/* more stars in the band */
+		u32 b;
+
+		c = lerp(sky_top, sky_low, (unsigned int)(t * t / 255));
+		if (d > -520 && d < 520)
+			c = lerp(c, rgb(70, 70, 150), (unsigned int)(24 - abs(d) / 24));
+		if ((h & 0x3FF) < (u32)(5 * density)) {		/* a star */
+			b = 150 + ((h >> 12) & 0x7F);
+			return lerp(c, rgb(b, b, (unsigned)min(255, (int)b + 30)), 220);
+		}
+		/* bright stars have little arms */
+		{
+			static const int nb[4][2] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
+			int i;
+
+			for (i = 0; i < 4; i++) {
+				u32 g = hash2(x + nb[i][0], y + nb[i][1]);
+
+				if ((g & 0x3FF) < (u32)(5 * density) && ((g >> 20) & 15) < 3)
+					return lerp(c, LIGHT, 110);
+			}
+		}
+	}
 	return c;
 }
 

@@ -13,9 +13,12 @@
 #include <hix/spinlock.h>
 #include <aether/kalloc.h>
 #include <aether/sched.h>
+#include <aether/uspace.h>
 #include <qubix/libq.h>
 #include <qubix/proc.h>
 #include <qubix/tty.h>
+#include <qubix/uexec.h>
+#include <gantry/kit.h>
 
 static LIST_HEAD(all_procs);
 static DEFINE_SPINLOCK(proc_lock);
@@ -105,11 +108,49 @@ void proc_exit(int status)
 	int fd;
 
 	p->exit_status = status;
+	gantry_post("proc.exit", (long)p->pid);
+	uspace_release(thread_current());	/* ring 3: free the address space */
 	qubix_display_release(p);	/* a program that dies gives the screen back */
 	tty_set_raw(false);		/* ... and the keyboard */
 	for (fd = 0; fd < NOFILE; fd++)
 		proc_fd_close(p, fd);
 	thread_exit();
+}
+
+bool proc_exists(pid_t pid)
+{
+	unsigned long flags;
+	struct proc *p;
+	bool found = false;
+
+	spin_lock_irqsave(&proc_lock, flags);
+	list_for_each_entry(p, &all_procs, node)
+		if (p->pid == pid && p->state != PROC_ZOMBIE)
+			found = true;
+	spin_unlock_irqrestore(&proc_lock, flags);
+	return found;
+}
+
+long proc_kill(pid_t pid)
+{
+	unsigned long flags;
+	struct proc *p;
+	long ret = -ESRCH;
+
+	if (pid <= 1)
+		return -EPERM;			/* the kernel and init stay */
+	spin_lock_irqsave(&proc_lock, flags);
+	list_for_each_entry(p, &all_procs, node) {
+		if (p->pid == pid && p->state != PROC_ZOMBIE) {
+			p->killed = true;
+			ret = 0;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&proc_lock, flags);
+	if (!ret && pid == proc_current()->pid)
+		proc_exit(PROC_KILLED_STATUS);
+	return ret;
 }
 
 static const struct qprog *find_prog(const char *name)
@@ -131,6 +172,7 @@ static void proc_entry(void *arg)
 	char *s = p->cmdline;
 	int argc = 0;
 
+
 	while (*s && argc < PROC_ARGS_MAX) {
 		while (*s == ' ')
 			*s++ = '\0';
@@ -141,6 +183,9 @@ static void proc_entry(void *arg)
 			s++;
 	}
 	argv[argc] = NULL;
+
+	if (!prog)			/* a program from /bin: ring 3 */
+		q_exit(-uexec_file(p->comm, argc, argv));
 
 	/* from here on the program only talks to the kernel via int 0x80 */
 	q_exit(prog->main(argc, argv));
@@ -163,7 +208,7 @@ pid_t proc_spawn(const char *cmdline)
 	}
 	name[n] = '\0';
 	prog = find_prog(name);
-	if (!prog)
+	if (!prog && !uexec_exists(name))
 		return -ENOENT;
 
 	p = kzalloc(sizeof(*p));
@@ -214,6 +259,7 @@ pid_t proc_spawn(const char *cmdline)
 		kfree(p);
 		return -ENOMEM;
 	}
+	gantry_post("proc.spawn", (long)p->pid);
 	return p->pid;
 }
 

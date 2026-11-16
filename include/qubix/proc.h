@@ -28,6 +28,7 @@ struct proc {
 	struct list_head node;
 	struct waitq child_wq;		/* parents sleep here in wait4() */
 	char *cmdline;			/* backing store for argv */
+	bool killed;			/* kill(2) was called: exit at the next syscall */
 };
 
 /* a built-in program, the equivalent of an executable on disk */
@@ -42,6 +43,10 @@ struct proc *proc_current(void);
 pid_t proc_spawn(const char *cmdline);			/* pid or -errno */
 long proc_wait(pid_t pid, int *status);			/* reaped pid or -errno */
 void proc_exit(int status) __attribute__((noreturn));
+/* ask @pid to end; it does so at its next system call. 0 or -errno */
+long proc_kill(pid_t pid);
+bool proc_exists(pid_t pid);
+#define PROC_KILLED_STATUS	137
 void qubix_display_release(struct proc *p);		/* syscall.c */
 
 int proc_fd_alloc(struct proc *p, struct file *f);	/* fd or -EMFILE */

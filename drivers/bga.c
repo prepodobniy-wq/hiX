@@ -120,7 +120,7 @@ void bga_disable(void)
 
 static struct hix_driver bga_driver = {
 	.name = "bga",
-	.class = "display",
+	.kind = "display",
 	.level = DRV_LEVEL_PLATFORM,
 	.probe = bga_probe,
 	.start = bga_start,

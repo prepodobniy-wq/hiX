@@ -111,6 +111,7 @@ static void test_text(void)
 }
 
 static steel_cell_t screen[PIX_COLS * PIX_ROWS];
+static u32 backmem[W * H], spritemem[PIX_SPRITE_PX];
 
 static void test_pixdev(void)
 {
@@ -121,10 +122,10 @@ static void test_pixdev(void)
 
 	printf("-- pixdev\n");
 	gfx_canvas_init(&fb, W, H, fbmem);
-	pixdev_init(&d, &fb);
+	pixdev_init(&d, &fb, backmem, spritemem);
 	ox = d.off_x;
 	oy = d.off_y;
-	CHECK(ox == 32 && oy == 34);
+	CHECK(ox == 32 && oy == 24);
 
 	for (i = 0; i < PIX_COLS * PIX_ROWS; i++)
 		screen[i] = STEEL_CELL(' ', STEEL_ATTR(STEEL_BLACK, STEEL_LGRAY));
@@ -246,7 +247,7 @@ static void test_theme(void)
 
 	printf("-- the Argent theme\n");
 	gfx_canvas_init(&fb, W, H, fbmem);
-	pixdev_init(&d, &fb);
+	pixdev_init(&d, &fb, backmem, spritemem);
 	for (i = 0; i < PIX_COLS * PIX_ROWS; i++)
 		grid[i] = STEEL_CELL(' ', THEME_DESKTOP_ATTR);
 

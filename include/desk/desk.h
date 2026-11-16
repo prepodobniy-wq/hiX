@@ -19,6 +19,7 @@
 #include <hix/types.h>
 #include <steel/steel.h>
 #include <steel/gfx.h>
+#include <steel/panel.h>
 #include <qubix/input.h>
 
 #define DESK_W		80
@@ -135,6 +136,15 @@ struct desk_backend {
 			  int stride);
 	void (*client_dirty)(int idx, int x, int y, int w, int h);
 	void (*client_clear)(int idx);
+	/* the pixel display's top and bottom bars (may be NULL) */
+	void (*panel)(const struct steel_panel *p);
+	/* show a window at an exact pixel position (cells: NULL = stop); may be NULL */
+	void (*float_win)(const steel_cell_t *cells, int cx, int cy, int cw, int ch,
+			  int px, int py);
+	/* seconds since the epoch, < 0 when there is no clock (may be NULL) */
+	long (*wall_time)(void);
+	/* restart or power off the machine (may be NULL) */
+	void (*power)(bool halt);
 };
 
 /* the program that runs the desktop says whether the display has pixels */

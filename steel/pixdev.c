@@ -45,51 +45,139 @@ static const char *const cursor_art[PIX_CUR_H] = {
 	".......XX...",
 };
 
-static void cursor_restore(struct pixdev *d)
-{
-	int i, j;
+/* ---- dirty spans and the real screen ------------------------------------ */
 
-	if (!d->under_valid)
+/* remember that the rectangle changed in the back buffer */
+static void mark(struct pixdev *d, int x, int y, int w, int h)
+{
+	int x0 = max(x, 0), x1 = min(x + w, d->fb.w);
+	int y0 = max(y, 0), y1 = min(y + h, min(d->fb.h, PIX_MAX_H));
+
+	if (x0 >= x1)
 		return;
-	for (j = 0; j < PIX_CUR_H; j++)
-		for (i = 0; i < PIX_CUR_W; i++)
-			gfx_plot(&d->fb, d->under_x + i, d->under_y + j,
-				 d->under[j * PIX_CUR_W + i], 255);
-	d->under_valid = false;
+	for (; y0 < y1; y0++) {
+		if (d->span0[y0] >= d->span1[y0]) {
+			d->span0[y0] = (s16)x0;
+			d->span1[y0] = (s16)x1;
+		} else {
+			d->span0[y0] = (s16)min((int)d->span0[y0], x0);
+			d->span1[y0] = (s16)max((int)d->span1[y0], x1);
+		}
+	}
 }
 
-static void cursor_draw(struct pixdev *d)
+/* 3 steps of shadow, 1 = nearest to the window */
+static u32 shade(u32 c, int step)
+{
+	if (step == 1)
+		return ((c >> 1) & 0x7F7F7F) + ((c >> 3) & 0x1F1F1F);
+	if (step == 2)
+		return c - ((c >> 2) & 0x3F3F3F);
+	return c - ((c >> 3) & 0x1F1F1F);
+}
+
+static void draw_float(struct pixdev *d)
+{
+	const struct gfx_canvas *s = &d->screen;
+	int x0 = d->fl_x, y0 = d->fl_y, w = d->fl_w, h = d->fl_h, y, i;
+
+	/* the shadow first: the background, darker, right and below the window */
+	for (y = max(y0 + 4, 0); y < min(y0 + h + PIX_FLOAT_SHADOW, s->h); y++) {
+		int xa = x0 + (y < y0 + h ? w : 4);
+		int xb = x0 + w + PIX_FLOAT_SHADOW;
+		int x;
+
+		for (x = max(xa, 0); x < min(xb, s->w); x++) {
+			int dist = max(x - (x0 + w - 1), y - (y0 + h - 1));
+			int step = dist <= 2 ? 1 : dist <= 4 ? 2 : 3;
+
+			s->px[y * s->stride + x] =
+				shade(d->fb.px[y * d->fb.stride + x], step);
+		}
+	}
+	for (i = 0; i < h; i++) {
+		int y1 = y0 + i, xa = max(x0, 0), xb = min(x0 + w, s->w);
+
+		if (y1 < 0 || y1 >= s->h || xa >= xb)
+			continue;
+		memcpy(&s->px[y1 * s->stride + xa],
+		       &d->sprite[i * w + (xa - x0)], (size_t)(xb - xa) * 4);
+	}
+}
+
+static void draw_pointer(struct pixdev *d)
 {
 	int i, j;
 
 	if (!d->cur_visible)
 		return;
-	d->under_x = d->cur_x;
-	d->under_y = d->cur_y;
 	for (j = 0; j < PIX_CUR_H; j++) {
 		for (i = 0; i < PIX_CUR_W; i++) {
-			int x = d->cur_x + i, y = d->cur_y + j;
 			char a = cursor_art[j][i];
 
-			d->under[j * PIX_CUR_W + i] =
-				x >= 0 && x < d->fb.w && y >= 0 && y < d->fb.h ?
-				d->fb.px[y * d->fb.stride + x] : 0;
 			if (a == 'X')
-				gfx_plot(&d->fb, x, y, GFX_RGB(0, 0, 0), 255);
+				gfx_plot(&d->screen, d->cur_x + i, d->cur_y + j,
+					 GFX_RGB(0, 0, 0), 255);
 			else if (a == 'O')
-				gfx_plot(&d->fb, x, y, GFX_RGB(255, 255, 255), 255);
+				gfx_plot(&d->screen, d->cur_x + i, d->cur_y + j,
+					 GFX_RGB(255, 255, 255), 255);
 		}
 	}
-	d->under_valid = true;
+}
+
+/*
+ * Bring the screen up to date: copy the changed spans of the back buffer,
+ * lay the floating window over them, then the pointer.
+ */
+static void copy_span(struct pixdev *d, int y, int x0, int x1)
+{
+	const struct gfx_canvas *s = &d->screen;
+
+	if (x0 < x1)
+		memcpy(&s->px[y * s->stride + x0], &d->fb.px[y * d->fb.stride + x0],
+		       (size_t)(x1 - x0) * 4);
+}
+
+static void flush(struct pixdev *d)
+{
+	bool hit_float = d->fl_redo;
+	int y, rows = min(d->screen.h, PIX_MAX_H);
+
+	if (d->fl_on && !hit_float) {
+		for (y = 0; y < rows && !hit_float; y++)
+			hit_float = d->span0[y] < d->span1[y] &&
+				    y >= d->fl_y &&
+				    y < d->fl_y + d->fl_h + PIX_FLOAT_SHADOW &&
+				    d->span1[y] > d->fl_x &&
+				    d->span0[y] < d->fl_x + d->fl_w + PIX_FLOAT_SHADOW;
+	}
+	for (y = 0; y < rows; y++) {
+		int x0 = d->span0[y], x1 = d->span1[y];
+
+		if (x0 >= x1)
+			continue;
+		if (d->fl_on && hit_float && y >= d->fl_y && y < d->fl_y + d->fl_h) {
+			/* the sprite is about to cover this part: do not copy it */
+			copy_span(d, y, x0, min(x1, d->fl_x));
+			copy_span(d, y, max(x0, d->fl_x + d->fl_w), x1);
+		} else {
+			copy_span(d, y, x0, x1);
+		}
+		d->span0[y] = d->span1[y] = 0;
+	}
+	if (d->fl_on && hit_float)
+		draw_float(d);
+	d->fl_redo = false;
+	draw_pointer(d);
 }
 
 void pixdev_cursor(struct pixdev *d, int x, int y, bool visible)
 {
-	cursor_restore(d);
+	mark(d, d->cur_x, d->cur_y, PIX_CUR_W, PIX_CUR_H);
 	d->cur_x = x;
 	d->cur_y = y;
 	d->cur_visible = visible;
-	cursor_draw(d);
+	flush(d);
 }
 
 /* ---- line and block characters ---------------------------------------- */
@@ -213,14 +301,92 @@ static void draw_base(struct pixdev *d, int cx, int cy, steel_cell_t cell,
 
 /* ---- the device ---------------------------------------------------------- */
 
-void pixdev_init(struct pixdev *d, const struct gfx_canvas *fb)
+void pixdev_init(struct pixdev *d, const struct gfx_canvas *fb, u32 *back,
+		 u32 *sprite)
 {
 	memset(d, 0, sizeof(*d));
-	d->fb = *fb;
-	gfx_clip_reset(&d->fb);
+	d->screen = *fb;
+	gfx_canvas_init(&d->fb, fb->w, fb->h, back);
+	d->sprite = sprite;
 	d->off_x = pixdev_off_x(fb);
 	d->off_y = pixdev_off_y(fb);
 	theme_wallpaper(&d->fb, 0, 0, fb->w, fb->h);
+	mark(d, 0, 0, fb->w, fb->h);
+	flush(d);
+}
+
+/* ---- the floating window ------------------------------------------------ */
+
+int pixdev_float(struct pixdev *d, const steel_cell_t *cells, int cx, int cy,
+		 int cw, int ch, int px, int py)
+{
+	bool same = d->fl_on && d->fl_cx == cx && d->fl_cy == cy &&
+		    d->fl_cw == cw && d->fl_ch == ch;
+	int x, y;
+
+	if (cx < 0 || cy < 0 || cw <= 0 || ch <= 0 || cx + cw > PIX_COLS ||
+	    cy + ch > PIX_ROWS)
+		return -EINVAL;
+	for (y = 0; same && y < ch; y++)
+		for (x = 0; x < cw; x++)
+			if (d->fl_cells[(cy + y) * PIX_COLS + cx + x] !=
+			    cells[(cy + y) * PIX_COLS + cx + x])
+				same = false;
+	if (!same) {			/* draw the window's cells into the sprite */
+		/* draw through the same code, with the canvas swapped for a while */
+		struct gfx_canvas saved = d->fb;
+		int ox = d->off_x, oy = d->off_y;
+
+		gfx_canvas_init(&d->fb, cw * PIX_CELL_W, ch * PIX_CELL_H, d->sprite);
+		d->off_x = -cx * PIX_CELL_W;
+		d->off_y = -cy * PIX_CELL_H;
+		for (y = cy; y < cy + ch; y++)
+			for (x = cx; x < cx + cw; x++)
+				draw_cell(d, x, y, cells[y * PIX_COLS + x], cells);
+		d->fb = saved;
+		d->off_x = ox;
+		d->off_y = oy;
+		for (y = cy; y < cy + ch; y++)
+			memcpy(&d->fl_cells[y * PIX_COLS + cx], &cells[y * PIX_COLS + cx],
+			       (size_t)cw * sizeof(*cells));
+	}
+	if (d->fl_on)
+		mark(d, d->fl_x, d->fl_y, d->fl_w + PIX_FLOAT_SHADOW,
+		     d->fl_h + PIX_FLOAT_SHADOW);
+	d->fl_on = true;
+	d->fl_cx = cx;
+	d->fl_cy = cy;
+	d->fl_cw = cw;
+	d->fl_ch = ch;
+	d->fl_x = px;
+	d->fl_y = py;
+	d->fl_w = cw * PIX_CELL_W;
+	d->fl_h = ch * PIX_CELL_H;
+	mark(d, px, py, d->fl_w + PIX_FLOAT_SHADOW, d->fl_h + PIX_FLOAT_SHADOW);
+	d->fl_redo = true;
+	flush(d);
+	return 0;
+}
+
+void pixdev_float_off(struct pixdev *d)
+{
+	if (!d->fl_on)
+		return;
+	mark(d, d->fl_x, d->fl_y, d->fl_w + PIX_FLOAT_SHADOW,
+	     d->fl_h + PIX_FLOAT_SHADOW);
+	d->fl_on = false;
+	flush(d);
+}
+
+void pixdev_panel(struct pixdev *d, const struct steel_panel *p)
+{
+	if (d->have_panel && !memcmp(&d->panel, p, sizeof(*p)))
+		return;
+	d->panel = *p;
+	d->have_panel = true;
+	panel_draw(&d->fb, &d->panel);
+	mark(d, 0, 0, d->fb.w, PANEL_TOP_H);
+	flush(d);
 }
 
 int pixdev_client_set(struct pixdev *d, int idx, int x, int y, int w, int h,
@@ -289,7 +455,6 @@ void pixdev_present(struct pixdev *d, const steel_cell_t *cells)
 	static bool dirty[PIX_COLS * PIX_ROWS];
 	int cx, cy, i;
 
-	cursor_restore(d);
 	for (cy = 0; cy < PIX_ROWS; cy++) {
 		for (cx = 0; cx < PIX_COLS; cx++) {
 			int n = cy * PIX_COLS + cx;
@@ -325,6 +490,8 @@ void pixdev_present(struct pixdev *d, const steel_cell_t *cells)
 			if (!dirty[n])
 				continue;
 			draw_cell(d, cx, cy, cells[n], cells);
+			mark(d, d->off_x + cx * PIX_CELL_W, d->off_y + cy * PIX_CELL_H,
+			     PIX_CELL_W, PIX_CELL_H);
 			d->prev[n] = cells[n];
 		}
 	}
@@ -332,5 +499,5 @@ void pixdev_present(struct pixdev *d, const steel_cell_t *cells)
 	for (i = 0; i < PIX_CLIENTS; i++)
 		d->client[i].dx0 = d->client[i].dx1 = d->client[i].dy0 =
 			d->client[i].dy1 = 0;
-	cursor_draw(d);
+	flush(d);
 }

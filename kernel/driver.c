@@ -50,18 +50,18 @@ void driver_start_levels(int first, int last)
 			if (drv->probe && drv->probe() != 0) {
 				drv->state = DRV_ABSENT;
 				pr_info("%s (%s): not present\n", drv->name,
-					drv->class);
+					drv->kind);
 				continue;
 			}
 			err = drv->start ? drv->start() : 0;
 			if (err) {
 				drv->state = DRV_FAILED;
 				pr_err("%s (%s): start failed (%d)\n",
-				       drv->name, drv->class, err);
+				       drv->name, drv->kind, err);
 				continue;
 			}
 			drv->state = DRV_RUNNING;
-			pr_info("%s (%s): started\n", drv->name, drv->class);
+			pr_info("%s (%s): started\n", drv->name, drv->kind);
 		}
 	}
 }

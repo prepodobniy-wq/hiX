@@ -65,6 +65,33 @@ trap_common:
 	add	esp, 8			; vector + error code
 	iret
 
+; void enter_user(unsigned long entry, unsigned long user_esp);
+; Drop to ring 3 with a clean register file. Never returns; the way back is
+; a trap, which lands on the kernel stack named by TSS.esp0.
+global enter_user
+enter_user:
+	mov	eax, [esp + 4]
+	mov	edx, [esp + 8]
+	cli
+	mov	cx, 0x23		; USER_DS
+	mov	ds, cx
+	mov	es, cx
+	mov	fs, cx
+	mov	gs, cx
+	push	dword 0x23		; ss
+	push	edx			; esp
+	push	dword 0x202		; eflags: IF set
+	push	dword 0x1B		; USER_CS
+	push	eax			; eip
+	xor	eax, eax
+	xor	ebx, ebx
+	xor	ecx, ecx
+	xor	edx, edx
+	xor	esi, esi
+	xor	edi, edi
+	xor	ebp, ebp
+	iret
+
 section .rodata
 global trap_stub_table
 trap_stub_table:

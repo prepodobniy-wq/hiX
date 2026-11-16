@@ -185,7 +185,7 @@ static int vga_start(void)
 
 static struct hix_driver vga_driver = {
 	.name = "vga",
-	.class = "display",
+	.kind = "display",
 	.level = DRV_LEVEL_CONSOLE,
 	.start = vga_start,
 };

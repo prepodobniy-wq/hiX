@@ -133,7 +133,7 @@ static int mouse_start(void)
 
 static struct hix_driver mouse_driver = {
 	.name = "ps2mouse",
-	.class = "input",
+	.kind = "input",
 	.level = DRV_LEVEL_INPUT,
 	.start = mouse_start,
 };

@@ -14,6 +14,9 @@ void sched_init(void);			/* the boot context becomes "idle" */
  * are still disabled when schedule() returns (for the resumed thread). */
 void schedule(void);
 
+/* per switch hook (arch/uspace): kernel stack for traps and page directory */
+void arch_thread_switch(struct thread *next);
+
 /* Idle loop of the boot thread; never returns. */
 void sched_idle_loop(void) __attribute__((noreturn));
 

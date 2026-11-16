@@ -38,6 +38,7 @@ struct gfx_font {
 extern const struct gfx_font gfx_font_cell;	/* 12x28, code page 437 */
 extern const struct gfx_font gfx_font_ui;	/* proportional, ~14 px */
 extern const struct gfx_font gfx_font_uib;	/* proportional bold, ~20 px */
+extern const struct gfx_font gfx_font_ubs;	/* proportional bold, 12 px: panels */
 
 #define GFX_SPRITE	64		/* chess sprite size */
 extern const u8 gfx_chess_sprites[6 * GFX_SPRITE * GFX_SPRITE];
