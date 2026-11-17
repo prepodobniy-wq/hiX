@@ -115,14 +115,18 @@ generator manually.
    `qemu-system-i386 -m 128M -kernel build/hix.elf -append 'hix.safe=1'` or
    the GRUB **safe mode** entry (without splash, quiet and screensaver). If it
    works, the problem is in early VGA/timers.
-4. Make sure QEMU runs with `-vga std` (it already does in `make run`);
-   the pixel mode requires Bochs VBE.
+4. Make sure QEMU runs with `-vga std` (Bochs VBE, the default in `make run`)
+   or `-vga vmware` (VMware SVGA II); both give the 1024x768x32 pixel mode.
+   Other adapters keep the 80x25 text mode.
 5. Send `build/smoke/serial.log` or the output of `make run-serial`.
 
 `make smoke` is the fastest way to check that the kernel reaches the shell at
 all: it starts QEMU without a window, connects to COM1 and runs `uname`,
 `crypto`, `kitinfo`, `fstest`, `cryptotest`, `hixfetch`, the screensaver and
-`halt`.
+`halt`. `make gfxcheck` starts `desk` under QEMU with `-vga std`,
+`-vga vmware` and `-vga cirrus` and checks the real console: pixel frames for
+the first two, a redraw after F9 and a clean return to text mode after leaving
+the desktop.
 
 ## Where to look next
 

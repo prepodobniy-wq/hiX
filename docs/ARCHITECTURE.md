@@ -5,7 +5,7 @@
     +-----------------------------+--------------------------------+
     |  aether: task/thread, scheduler, ports/IPC, vm, heap         |  steel
     +-----------------------------+--------------------------------+  (graphics)
-    |  drivers: vga, bga, pci, serial, pit, rtc, ps2 kbd/mouse     |
+    |  drivers: vga, bga, vmware, pci, serial, pit, rtc, kbd/mouse |
     +--------------------------------------------------------------+
     |  hix core: boot, GDT/TSS/IDT/PIC, traps, printk, panic       |
     +--------------------------------------------------------------+
@@ -69,13 +69,15 @@ through `libq`/`int 0x80`.
 `steel_device` → `steel_surface` → `steel_cmdbuf` (write commands — `commit`) →
 `steel_layer` + compositor → console with ANSI colors and scrolling.
 
-Two backends: VGA text and **pixel** (`gfxdev`/`pixdev`). The `bga` driver
-finds a Bochs VBE adapter over PCI, sets 1024x768x32, takes the framebuffer from
-BAR0 (it falls into the existing uncached 4 MB pages). `pixdev` draws 80x25
-cells with a smooth 12x28 font and substitutes canvases of registered clients
-for "holes" (`STEEL_HOLE`). `canvas`/`gfx.h` is an ARGB canvas: fill, rounded
-rectangles, text, alpha blitting. The mouse cursor is drawn by the kernel with
-background saving; programs do not need cursor code.
+Two backends: VGA text and **pixel** (`gfxdev`/`pixdev`). The `bga` and
+`vmware` drivers find a Bochs VBE or VMware SVGA II adapter over PCI, set
+1024x768x32 and take the framebuffer from BAR0 (Bochs) or BAR1 (VMware); it
+falls into the existing uncached 4 MB pages. `steel/fb.c` picks the adapter,
+and `pixdev` draws 80x25 cells with a smooth 12x28 font and substitutes
+canvases of registered clients for "holes" (`STEEL_HOLE`). `canvas`/`gfx.h`
+is an ARGB canvas: fill, rounded rectangles, text, alpha blitting. The mouse
+cursor is drawn by the kernel with background saving; programs do not need
+cursor code.
 
 **Frame and smoothness.** `pixdev` draws into a clean screen copy in normal
 memory (`fb`) and writes only the changed row segments to video memory
@@ -121,8 +123,8 @@ XNU; the driver model is like IOKit). It is written in C++ (`gantry/`,
 - **Drivers** — `Driver` classes (`probe` gives a score, `start` starts);
   `GANTRY_DRIVER(Class, "ProviderClass")` registers a factory. For each node
   the driver with the best score wins and becomes its child node. Built in are
-  `GenericPCI` (fallback, determines the device type) and `BochsDisplay`
-  (1234:1111).
+  `GenericPCI` (fallback, determines the device type), `BochsDisplay`
+  (1234:1111) and `VMwareDisplay` (15ad:0405).
 - So far this is description and matching: the C drivers themselves
   (`drivers/`) work as before and move under Gantry gradually. Kit — the SDK
   for user programs — will be built on the same classes.

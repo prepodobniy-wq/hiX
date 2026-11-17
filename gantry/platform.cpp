@@ -29,7 +29,8 @@ static void scan_pci(Node *bus)
 				continue;
 			}
 			add_pci_device(bus, dev, fn, id, pci_read32(0, dev, fn, 8),
-				       pci_read32(0, dev, fn, 0x10));
+				       pci_read32(0, dev, fn, 0x10),
+				       pci_read32(0, dev, fn, 0x14));
 			if (fn == 0 && !(pci_read32(0, dev, 0, 0x0C) & 0x800000))
 				break;			/* single function device */
 		}

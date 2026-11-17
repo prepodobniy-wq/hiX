@@ -19,6 +19,7 @@
 #   make version      print the release version from include/hix/version.h
 #   make verify       host tests, style, multiboot, Rust, crypto, frames
 #   make smoke        boot in QEMU and check the shell over COM1
+#   make gfxcheck     boot in QEMU -vga std/vmware/cirrus and check the pixels
 #   make release      strict Rust build + verify + smoke + release package
 #   make help         this list
 #
@@ -251,6 +252,13 @@ verify:
 
 smoke: kernel
 	@python3 scripts/smoke.py
+
+# The three adapters hix knows: Bochs VBE, VMware SVGA II and the VGA text
+# fallback. Each boot opens desk and checks the actual QEMU console.
+gfxcheck: kernel
+	@python3 scripts/gfxcheck.py --vga std
+	@python3 scripts/gfxcheck.py --vga vmware
+	@python3 scripts/gfxcheck.py --vga cirrus
 
 release:
 	@scripts/release.sh

@@ -92,23 +92,26 @@ int main()
 
 	/* matching: the best score wins, only one driver per provider */
 	Registry::reset();
-	CHECK(Registry::factory_count() == 3);	/* GenericPCI, BochsDisplay, FastNic */
+	/* GenericPCI, BochsDisplay, VMwareDisplay, FastNic */
+	CHECK(Registry::factory_count() == 4);
 	{
 		Node *root = Registry::root();
 		Node *bus = pci_bus();
 		int started;
 
 		root->attach(bus);
-		add_pci_device(bus, 0, 0, 0x71908086, 0x06000000, 0);	/* a host bridge */
-		add_pci_device(bus, 2, 0, 0x11111234, 0x03000000, 0xFD000008);
-		add_pci_device(bus, 3, 0, 0x100E8086, 0x02000000, 0xFEBC0000);	/* a nic */
-		add_pci_device(bus, 4, 0, 0x100E8086, 0x02000000, 0);	/* no BAR */
+		add_pci_device(bus, 0, 0, 0x71908086, 0x06000000, 0, 0);	/* a host bridge */
+		add_pci_device(bus, 2, 0, 0x11111234, 0x03000000, 0xFD000008, 0);
+		add_pci_device(bus, 3, 0, 0x100E8086, 0x02000000, 0xFEBC0000, 0);	/* a nic */
+		add_pci_device(bus, 4, 0, 0x100E8086, 0x02000000, 0, 0);	/* no BAR */
+		add_pci_device(bus, 5, 0, 0x040515AD, 0x03000000, 0, 0xE0000008);
 
 		started = Registry::match(root);
-		CHECK(started == 3);			/* the fourth could not start */
+		CHECK(started == 4);			/* the fifth could not start */
 
 		Node *bridge = root->find("00.0"), *vga = root->find("02.0");
 		Node *nic = root->find("03.0"), *nic2 = root->find("04.0");
+		Node *vmw = root->find("05.0");
 
 		CHECK(bridge && bridge->driver());
 		CHECK_STR(bridge->driver()->name(), "GenericPCI");
@@ -117,6 +120,9 @@ int main()
 		CHECK_STR(vga->driver()->get("mode"), "1024x768x32");
 		/* the low flag bits of the BAR are masked */
 		CHECK_STR(vga->driver()->get("fb"), "fd000000");
+		CHECK(vmw && vmw->driver());
+		CHECK_STR(vmw->driver()->name(), "VMwareDisplay");
+		CHECK_STR(vmw->driver()->get("fb"), "e0000000");
 		CHECK_STR(nic->driver()->name(), "FastNic");
 		/* FastNic could not start without a BAR: the generic driver was not
 		 * tried instead, the node simply stays without one */
@@ -126,12 +132,14 @@ int main()
 		/* matching again changes nothing: nodes with a driver are skipped */
 		CHECK(Registry::match(root) == 0);	/* nic2 is tried again and fails again */
 		CHECK(started_log == 3);
-		CHECK(root->count() == 1 + 1 + 4 + 3);
+		CHECK(root->count() == 1 + 1 + 5 + 4);
 
 		CHECK(Registry::format(root, text, sizeof(text)) > 0);
 		CHECK(strstr(text, "+-o Root  <Platform>") == text);
 		CHECK(strstr(text, "    +-o BochsDisplay  <Driver kind=display "
 				   "mode=1024x768x32 fb=fd000000 score=64>"));
+		CHECK(strstr(text, "    +-o VMwareDisplay  <Driver kind=display "
+				   "mode=1024x768x32 fb=e0000000 score=64>"));
 		CHECK(strstr(text, "vendor=8086 device=7190"));
 	}
 

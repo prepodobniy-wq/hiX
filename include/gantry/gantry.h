@@ -134,7 +134,8 @@ public:
 };
 
 /* the registry as the platform builds it from the machine: gantry/platform.cpp */
-void add_pci_device(Node *bus, int dev, int fn, u32 id, u32 class_rev, u32 bar0);
+void add_pci_device(Node *bus, int dev, int fn, u32 id, u32 class_rev, u32 bar0,
+		    u32 bar1);
 
 }	/* namespace gantry */
 

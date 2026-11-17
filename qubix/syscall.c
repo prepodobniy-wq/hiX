@@ -30,7 +30,7 @@
 #include <gantry/gantry.h>
 #include <gantry/kit.h>
 #include <gantry/tweak.h>
-#include <steel/bga.h>
+#include <steel/fb.h>
 #include <hix/version.h>
 
 void steel_demo(void);
@@ -209,10 +209,11 @@ static int sysctl_text(const char *name, char *buf, size_t size)
 	if (!strcmp(name, "hw.freemem"))
 		return snprintf(buf, size, "%lu", pmm_free_count() * PAGE_SIZE);
 	if (!strcmp(name, "hw.display"))
-		return snprintf(buf, size, bga_present() ?
-				"%dx%d, bochs vbe" : "%dx%d, vga text",
-				bga_present() ? GFX_SCREEN_W : 80,
-				bga_present() ? GFX_SCREEN_H : 25);
+		return snprintf(buf, size, steel_fb_present() ?
+				"%dx%d, %s" : "%dx%d, vga text",
+				steel_fb_present() ? GFX_SCREEN_W : 80,
+				steel_fb_present() ? GFX_SCREEN_H : 25,
+				steel_fb_name());
 	if (!strcmp(name, "hix.desktop"))
 		return snprintf(buf, size, "hix Desktop (steel, Argent)");
 	if (!strcmp(name, "hix.ps"))

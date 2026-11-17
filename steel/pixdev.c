@@ -138,10 +138,23 @@ static void copy_span(struct pixdev *d, int y, int x0, int x1)
 		       (size_t)(x1 - x0) * 4);
 }
 
+static void notify(struct pixdev *d, int x0, int y0, int x1, int y1)
+{
+	if (!d->update)
+		return;
+	x0 = max(x0, 0);
+	y0 = max(y0, 0);
+	x1 = min(x1, d->screen.w);
+	y1 = min(y1, d->screen.h);
+	if (x0 < x1 && y0 < y1)
+		d->update(d->update_ctx, x0, y0, x1 - x0, y1 - y0);
+}
+
 static void flush(struct pixdev *d)
 {
 	bool hit_float = d->fl_redo;
 	int y, rows = min(d->screen.h, PIX_MAX_H);
+	int bx0 = d->screen.w, by0 = d->screen.h, bx1 = 0, by1 = 0;
 
 	if (d->fl_on && !hit_float) {
 		for (y = 0; y < rows && !hit_float; y++)
@@ -163,12 +176,28 @@ static void flush(struct pixdev *d)
 		} else {
 			copy_span(d, y, x0, x1);
 		}
+		bx0 = min(bx0, x0);
+		bx1 = max(bx1, x1);
+		by0 = min(by0, y);
+		by1 = max(by1, y + 1);
 		d->span0[y] = d->span1[y] = 0;
 	}
-	if (d->fl_on && hit_float)
+	if (d->fl_on && hit_float) {
 		draw_float(d);
+		bx0 = min(bx0, d->fl_x);
+		by0 = min(by0, d->fl_y);
+		bx1 = max(bx1, d->fl_x + d->fl_w + PIX_FLOAT_SHADOW);
+		by1 = max(by1, d->fl_y + d->fl_h + PIX_FLOAT_SHADOW);
+	}
 	d->fl_redo = false;
 	draw_pointer(d);
+	if (d->cur_visible) {
+		bx0 = min(bx0, d->cur_x);
+		by0 = min(by0, d->cur_y);
+		bx1 = max(bx1, d->cur_x + PIX_CUR_W);
+		by1 = max(by1, d->cur_y + PIX_CUR_H);
+	}
+	notify(d, bx0, by0, bx1, by1);
 }
 
 void pixdev_cursor(struct pixdev *d, int x, int y, bool visible)
@@ -304,7 +333,13 @@ static void draw_base(struct pixdev *d, int cx, int cy, steel_cell_t cell,
 void pixdev_init(struct pixdev *d, const struct gfx_canvas *fb, u32 *back,
 		 u32 *sprite)
 {
+	/* a backend may install the update hook before the first frame */
+	void (*update)(void *ctx, int x, int y, int w, int h) = d->update;
+	void *update_ctx = d->update_ctx;
+
 	memset(d, 0, sizeof(*d));
+	d->update = update;
+	d->update_ctx = update_ctx;
 	d->screen = *fb;
 	gfx_canvas_init(&d->fb, fb->w, fb->h, back);
 	d->sprite = sprite;

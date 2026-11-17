@@ -58,7 +58,27 @@ public:
 	}
 };
 
+class VMwareDisplay : public Driver {
+public:
+	VMwareDisplay() : Driver("VMwareDisplay") {}
+
+	int probe(Node *provider) override
+	{
+		return provider->get_hex("vendor") == 0x15AD &&
+		       provider->get_hex("device") == 0x0405 ? 100 : -1;
+	}
+
+	int start(Node *provider) override
+	{
+		set("kind", "display");
+		set("mode", "1024x768x32");
+		set_hex("fb", provider->get_hex("bar1") & ~0xFu);
+		return 0;
+	}
+};
+
 GANTRY_DRIVER(GenericPCI, "PCIDevice");
 GANTRY_DRIVER(BochsDisplay, "PCIDevice");
+GANTRY_DRIVER(VMwareDisplay, "PCIDevice");
 
 }	/* namespace gantry */

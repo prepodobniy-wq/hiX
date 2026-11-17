@@ -1,5 +1,21 @@
 # Version history
 
+## Unreleased — VMware SVGA II
+
+- **VMware graphics fixed (#2).** A native VMware SVGA II driver
+  (`15ad:0405`, `drivers/vmware.c`) was added next to the Bochs VBE driver,
+  behind a shared `steel_fb_*` front-end (`steel/fb.c`). The framebuffer comes
+  from BAR1, the mode is 1024x768x32, and changed rectangles are queued
+  through the SVGA command FIFO so the host refreshes the screen. `desk` now
+  draws its real icons, wallpaper, panels and fonts under VMware and QEMU
+  `-vga vmware` instead of falling back to VGA text symbols. Leaving the
+  desktop restores the VGA text mode and font as before.
+- Gantry gained a `VMwareDisplay` driver and exposes BAR1; `sysctl hw.display`
+  names the active adapter (`bochs vbe` or `vmware svga`).
+- New `make gfxcheck` boots QEMU with `-vga std`, `-vga vmware` and
+  `-vga cirrus`, starts `desk` and checks the real console: 1024x768 pixel
+  frames, a redraw after F9, and a clean return to 720x400 text mode.
+
 ## 1.0.0 — first public release after 0.3.4
 Includes local 0.3.5–0.6.1 and brings boot, the ring 3 ABI and release
 engineering to a state that can be promised to users. Detailed notes —

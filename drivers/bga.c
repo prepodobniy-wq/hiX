@@ -11,7 +11,7 @@
 #include <hix/driver.h>
 #include <hix/pci.h>
 #include <asm/io.h>
-#include <steel/bga.h>
+#include <steel/fb.h>
 
 #define VBE_INDEX	0x01CE
 #define VBE_DATA	0x01CF

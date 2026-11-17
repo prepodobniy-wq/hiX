@@ -240,7 +240,8 @@ int Registry::format(const Node *node, char *buf, size_t size)
 	return (size_t)len < size ? len : (int)size - 1;
 }
 
-void add_pci_device(Node *bus, int dev, int fn, u32 id, u32 class_rev, u32 bar0)
+void add_pci_device(Node *bus, int dev, int fn, u32 id, u32 class_rev, u32 bar0,
+		    u32 bar1)
 {
 	char name[Node::NAME_LEN];
 	Node *n;
@@ -253,6 +254,7 @@ void add_pci_device(Node *bus, int dev, int fn, u32 id, u32 class_rev, u32 bar0)
 	n->set_hex("device", id >> 16);
 	n->set_hex("class", class_rev >> 16);
 	n->set_hex("bar0", bar0);
+	n->set_hex("bar1", bar1);
 	bus->attach(n);
 }
 

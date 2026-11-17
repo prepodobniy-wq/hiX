@@ -53,6 +53,9 @@ struct pixdev {
 	 */
 	struct gfx_canvas fb;
 	struct gfx_canvas screen;	/* the real framebuffer */
+	/* called after pixels reached the real screen; NULL in host tests */
+	void (*update)(void *ctx, int x, int y, int w, int h);
+	void *update_ctx;
 	s16 span0[PIX_MAX_H], span1[PIX_MAX_H];	/* dirty x range per row */
 	int off_x, off_y;		/* pixel position of cell (0, 0) */
 	/* a window being dragged: a pixel sprite at an exact position */

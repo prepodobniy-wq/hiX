@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* steel gfxdev: the pixel display (see gfxdev.h). */
 #include <hix/kernel.h>
-#include <steel/bga.h>
+#include <steel/fb.h>
 #include <steel/gfxdev.h>
 
 static struct pixdev pixdev;
@@ -10,6 +10,12 @@ static u32 back_mem[GFX_SCREEN_W * GFX_SCREEN_H];
 static u32 sprite_mem[PIX_SPRITE_PX];
 static struct steel_device *text_device;
 static bool active;
+
+static void gfx_update(void *ctx, int x, int y, int w, int h)
+{
+	(void)ctx;
+	steel_fb_update(x, y, w, h);
+}
 
 static void gfx_present(struct steel_device *dev, const struct steel_surface *s)
 {
@@ -41,10 +47,11 @@ int steel_gfx_enter(void)
 
 	if (active)
 		return 0;
-	mem = bga_enable(GFX_SCREEN_W, GFX_SCREEN_H);
+	mem = steel_fb_enable(GFX_SCREEN_W, GFX_SCREEN_H);
 	if (!mem)
 		return -ENODEV;
 	gfx_canvas_init(&fb, GFX_SCREEN_W, GFX_SCREEN_H, mem);
+	pixdev.update = gfx_update;
 	pixdev_init(&pixdev, &fb, back_mem, sprite_mem);
 	pixdev_cursor(&pixdev, GFX_SCREEN_W / 2, GFX_SCREEN_H / 2, true);
 	text_device = steel_get_device();
@@ -59,7 +66,7 @@ void steel_gfx_leave(void)
 		return;
 	active = false;
 	steel_set_device(text_device);
-	bga_disable();
+	steel_fb_disable();
 }
 
 bool steel_gfx_active(void)
