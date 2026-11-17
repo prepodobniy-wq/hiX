@@ -1,64 +1,64 @@
-# Версии и совместимость
+# Versions and compatibility
 
-## Одна версия на всё
+## One version for everything
 
-`include/hix/version.h` — единственный источник номера:
+`include/hix/version.h` is the only source of the number:
 
     #define HIX_RELEASE "1.0.0"
 
-Из него собираются `HIX_VERSION`/`HIX_RELEASE` в `include/hix/hix.h`,
-строка `uname`, шапка шелла, `hixfetch`, `kitinfo` и релизные артефакты.
-`make version` печатает значение. Не добавляйте номер в код, Makefile или
-тесты: расхождение версий — это баг релизной инженерии, а не мелочь. В README
-и заметках о выпуске номер допустим как часть описания релиза, но сверяйте
-его с `make version` перед тегом.
+From it are built `HIX_VERSION`/`HIX_RELEASE` in `include/hix/hix.h`,
+the `uname` string, the shell header, `hixfetch`, `kitinfo` and the release
+artifacts. `make version` prints the value. Do not add the number to code,
+the Makefile or tests: a version mismatch is a release-engineering bug, not a
+minor issue. In the README and release notes the number is allowed as part of
+the release description, but check it against `make version` before tagging.
 
-## Схема
+## Scheme
 
-hix следует `MAJOR.MINOR.PATCH` в духе semver, но с оговоркой: это ядро и
-операционная среда, а не библиотека.
+hix follows `MAJOR.MINOR.PATCH` in the spirit of semver, with a caveat: this is
+a kernel and an operating environment, not a library.
 
-| Часть | Когда растёт | Пример |
+| Part | When it increments | Example |
 |---|---|---|
-| `MAJOR` | ломается ABI ring 3, формат initfs/ELF, `SYS_*`, загрузочный протокол или поведение, на которое рассчитывают программы | 1.0.0 → 2.0.0 |
-| `MINOR` | новые возможности без слома существующих: новый syscall, драйвер, программа, параметр загрузки | 1.0.0 → 1.1.0 |
-| `PATCH` | исправления и совместимые улучшения | 1.0.0 → 1.0.1 |
+| `MAJOR` | the ring 3 ABI, initfs/ELF format, `SYS_*`, boot protocol, or behavior that programs rely on breaks | 1.0.0 → 2.0.0 |
+| `MINOR` | new features without breaking existing ones: a new syscall, driver, program, boot parameter | 1.0.0 → 1.1.0 |
+| `PATCH` | fixes and compatible improvements | 1.0.0 → 1.0.1 |
 
-До 1.0.0 номер жил своей жизнью: `0.3.x` — тема Argent и панели, `0.4.0` —
-Gantry, `0.5.0` — ring 3, `0.6.x` — Kit/SDK и Rust. Публичный релиз на
-GitHub был `0.3.4`; локальные `0.3.5`–`0.6.1` не публиковались. Поэтому
-`1.0.0` — первый публичный выпуск после `0.3.4` и одновременно заявление о
-стабильности, а не «ещё одна цифра».
+Before 1.0.0 the number lived its own life: `0.3.x` was the Argent theme and
+panels, `0.4.0` Gantry, `0.5.0` ring 3, `0.6.x` Kit/SDK and Rust. The public
+release on GitHub was `0.3.4`; local `0.3.5`–`0.6.1` were not published. That
+is why `1.0.0` is the first public release after `0.3.4` and at the same time
+a statement of stability, not "just another number".
 
-## Что обещает 1.0
+## What 1.0 promises
 
-- Обычный `make` собирается на чистой машине с GCC/NASM; Rust остаётся
-  необязательным (`SYS_crypto = -ENOSYS` без него).
-- `config/hix.conf` и `scripts/hixctl` остаются хостовым слоем настройки;
-  параметры `hix.*` в командной строке загрузчика перекрывают их на один
-  запуск.
-- Гостевые программы ring 3 используют документированные `SYS_*` и
-  `libhix`; ABI `SYS_crypto` версионирован полем `abi`.
-- `build/hix.elf` грузится через Multiboot в QEMU и через GRUB с ISO.
-- Тесты `make verify` и smoke-тест проходят на поддерживаемом хосте.
+- A normal `make` builds on a clean machine with GCC/NASM; Rust remains
+  optional (`SYS_crypto = -ENOSYS` without it).
+- `config/hix.conf` and `scripts/hixctl` remain the host-side configuration
+  layer; `hix.*` parameters on the boot command line override them for a single
+  boot.
+- Ring 3 guest programs use the documented `SYS_*` and `libhix`; the
+  `SYS_crypto` ABI is versioned by the `abi` field.
+- `build/hix.elf` boots via Multiboot in QEMU and via GRUB from the ISO.
+- `make verify` tests and the smoke test pass on a supported host.
 
-## Что не обещает
+## What it does not promise
 
-- Установку на диск, ext2/FAT, SMP, пользователей и права доступа.
-- Совместимость с Linux-бинарниками или POSIX-приложениями.
-- Сохранение данных между перезагрузками: VFS живёт в памяти.
-- Стабильность внутренних C-функций ядра: `aether_*`, `qubix_*`, `steel_*`
-  могут меняться без предупреждения. ABI — только `include/hix/*abi.h` и
-  документированные syscall-номера.
+- Installation to disk, ext2/FAT, SMP, users and access permissions.
+- Compatibility with Linux binaries or POSIX applications.
+- Data persistence across reboots: the VFS lives in memory.
+- Stability of internal C kernel functions: `aether_*`, `qubix_*`, `steel_*`
+  may change without notice. The ABI is only `include/hix/*abi.h` and the
+  documented syscall numbers.
 
-## Как выпускать патч
+## How to ship a patch
 
-1. Исправьте код и добавьте тест, который ловит регрессию.
-2. Обновите `HIX_RELEASE` (например, `1.0.1`).
-3. Добавьте раздел в `docs/CHANGELOG.md`.
-4. `make release`; проверьте `dist/SHA256SUMS` и `BUILD-INFO`.
-5. Поставьте тег `v1.0.1` и опубликуйте четыре файла, как в
+1. Fix the code and add a test that catches the regression.
+2. Update `HIX_RELEASE` (for example, `1.0.1`).
+3. Add a section to `docs/CHANGELOG.md`.
+4. `make release`; verify `dist/SHA256SUMS` and `BUILD-INFO`.
+5. Tag `v1.0.1` and publish the four files as described in
    [docs/RELEASE.md](RELEASE.md).
 
-Для `MINOR` дополнительно обновите `docs/ROADMAP.md` и, если меняется
-поведение ring 3, `docs/SDK.md`.
+For `MINOR`, also update `docs/ROADMAP.md` and, if ring 3 behavior changes,
+`docs/SDK.md`.

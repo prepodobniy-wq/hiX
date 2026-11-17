@@ -1,69 +1,78 @@
-# SDK и Kit (1.0.0)
+# SDK and Kit (1.0.0)
 
-Программы кольца 3 пишутся на C без libc. Всё нужное — в `user/sdk/`:
+Ring 3 programs are written in C without libc. Everything needed is in
+`user/sdk/`:
 
-- `hix.h` — системные вызовы (`hx_write`, `hx_read`, `hx_getpid`, `hx_exit`), строки,
-  `hx_printf` (`%s %c %d %u %x %%`, ширина, флаги `0` и `-`) и вызовы Kit;
-- `libhix.c` — реализация, `crt0.c` — точка входа (`_start` вызывает `main(void)`,
-  код возврата становится статусом выхода).
+- `hix.h` — system calls (`hx_write`, `hx_read`, `hx_getpid`, `hx_exit`),
+  strings, `hx_printf` (`%s %c %d %u %x %%`, width, `0` and `-` flags) and Kit
+  calls;
+- `libhix.c` — the implementation, `crt0.c` — the entry point (`_start` calls
+  `main(void)`, the return code becomes the exit status).
 
-## Сборка
+## Building
 
-Положите `имя.c` в `user/apps/` и выполните `make`. `scripts/mkapps.py` соберёт
-каждую программу в 32-битный ELF по адресу 0x40000000 (`-ffreestanding -N`), упакует
-их в архив initfs и вкомпонует его в ядро. При загрузке архив распаковывается в
-`/bin`; программу можно запустить из шелла просто по имени (`kitinfo`, `primes`).
-Шелл запускает её как обычный процесс, который переходит в кольцо 3.
+Put `name.c` in `user/apps/` and run `make`. `scripts/mkapps.py` builds each
+program into a 32-bit ELF at address 0x40000000 (`-ffreestanding -N`), packs
+them into an initfs archive and embeds it in the kernel. At boot the archive is
+unpacked into `/bin`; a program can be started from the shell by name
+(`kitinfo`, `primes`). The shell launches it as a normal process that switches
+to ring 3.
 
 ## Kit
 
-Kit — сервис Gantry с вызовом `call(op, msg)`. Программа находит сервис по имени
-(`kit_lookup`) и обращается к нему через единственный системный вызов `SYS_gantry`
-(600). Сообщение — `struct kit_msg` (длина и 120 байт данных), ядро копирует его
-и проверяет указатели по адресному пространству процесса.
+Kit is a Gantry service with a `call(op, msg)` method. A program finds a service
+by name (`kit_lookup`) and calls it through the single `SYS_gantry` system call
+(600). The message is `struct kit_msg` (length and 120 bytes of data); the
+kernel copies it and validates pointers against the process address space.
 
-| Kit | что даёт |
+| Kit | What it provides |
 |---|---|
-| `kit.system` | строка о системе, тики (100 Гц), число узлов реестра |
-| `kit.prop` | дерево свойств; читать можно всё, писать только ключи `user.*` |
-| `kit.notify` | счётчики тем событий; публиковать можно только `user.*` |
+| `kit.system` | system string, ticks (100 Hz), registry node count |
+| `kit.prop` | property tree; everything is readable, only `user.*` keys are writable |
+| `kit.notify` | event topic counters; only `user.*` can be published |
 
-Ядро и драйверы используют тот же Gantry на C++: `Services::publish`, `Notifier`
-(подписчики в ядре, события `proc.spawn`, `proc.exit`, `gantry.kits`), `Properties`.
+The kernel and drivers use the same Gantry in C++: `Services::publish`,
+`Notifier` (kernel subscribers, events `proc.spawn`, `proc.exit`,
+`gantry.kits`), `Properties`.
 
-## Системные вызовы кольца 3
+## Ring 3 system calls
 
-Разрешены: `exit`, `read`, `write`, `open`, `close`, `lseek`, `mkdir`, `unlink`,
-`getdirentries`, `gettimeofday`, `wait4`, `posix_spawn`, `kill`, `sysctlbyname`, сон и
-`yield`, а также `SYS_gantry` и `SYS_crypto` (601). Каждый указатель проходит
-`user_ok`/`copy_str` по адресному пространству процесса. Закрыты: графика
-(`steelctl`), порты IPC, `ioctl`, `reboot`. В libhix им соответствуют `hx_open`,
-`hx_readdir`, `hx_spawn`, `hx_wait`, `hx_sleep_ms`, `hx_time`, `hx_sysctl`,
-`hx_read_file`, `hx_write_file` и другие.
+Allowed: `exit`, `read`, `write`, `open`, `close`, `lseek`, `mkdir`, `unlink`,
+`getdirentries`, `gettimeofday`, `wait4`, `posix_spawn`, `kill`,
+`sysctlbyname`, sleep and `yield`, as well as `SYS_gantry` and `SYS_crypto`
+(601). Every pointer goes through `user_ok`/`copy_str` against the process
+address space. Closed: graphics (`steelctl`), IPC ports, `ioctl`, `reboot`.
+In libhix they correspond to `hx_open`, `hx_readdir`, `hx_spawn`, `hx_wait`,
+`hx_sleep_ms`, `hx_time`, `hx_sysctl`, `hx_read_file`, `hx_write_file` and
+others.
 
-`main(int argc, char **argv)`: аргументы кладутся на стек (до 16 штук, 1 КиБ).
-Примеры: `lsbin [каталог]`, `fstest` (файл в /tmp, дочерний процесс, время).
+`main(int argc, char **argv)`: arguments are placed on the stack (up to 16,
+1 KiB). Examples: `lsbin [directory]`, `fstest` (a file in /tmp, a child
+process, time).
 
-## Криптография (SYS_crypto)
+## Cryptography (SYS_crypto)
 
-`include/hix/cryptoabi.h` — общий ABI для ring 3 и ядра. В SDK:
+`include/hix/cryptoabi.h` is the shared ABI for ring 3 and the kernel. In the
+SDK:
 
     struct hix_crypto_req req = { .abi = HIX_CRYPTO_ABI, ... };
     long r = hx_crypto(HIX_CRYPTO_AEAD_SEAL, &req);
 
-`hx_crypto()` определён в `user/sdk/hix.h`; операция и поля запроса описаны в
-[docs/CRYPTO.md](CRYPTO.md). Ключ (32 байта), nonce (12) и тег (16) передаются
-каждый раз; ядро копирует буферы, проверяет указатели и затирает ключи после
-вызова. Ошибки: `-EINVAL`, `-EFAULT`, `-ENOMEM`, `-ENOSYS` (ядро без Rust),
-`-EBADMSG` (неверный тег). Пример — `user/apps/cryptotest.c`; он же шаблон для
-проверки шифра соседней команды.
+`hx_crypto()` is defined in `user/sdk/hix.h`; the operation and request fields
+are described in [docs/CRYPTO.md](CRYPTO.md). The key (32 bytes), nonce (12)
+and tag (16) are passed every time; the kernel copies the buffers, validates
+pointers and wipes the keys after the call. Errors: `-EINVAL`, `-EFAULT`,
+`-ENOMEM`, `-ENOSYS` (kernel without Rust), `-EBADMSG` (bad tag). An example is
+`user/apps/cryptotest.c`; it is also a template for verifying another team's
+cipher.
 
-## Ограничения (честно)
+## Limitations (honest)
 
-- Нет прав доступа и пользователей: любая программа может создавать и удалять файлы
-  и переключать tweaks.
-- Графического приложения вне ядра пока нет: нужен безопасный вызов поверхности окна.
-- Всё проверено на хосте (сборка настоящим компилятором, разбор ELF, раскладка argv,
-  распаковка initfs, тесты Gantry); в QEMU smoke-тест прогоняет `kitinfo`, `lsbin`,
-  `fstest` и `cryptotest`. Полный набор сценариев рабочего стола автоматически
-  не прогоняется.
+- No access rights or users: any program can create and delete files and
+  toggle tweaks.
+- There is no graphical application outside the kernel yet: a safe window
+  surface call is needed.
+- Everything is verified on the host (building with a real compiler, ELF
+  parsing, argv layout, initfs unpacking, Gantry tests); in QEMU the smoke test
+  runs `kitinfo`, `lsbin`, `fstest` and `cryptotest`. The full set of desktop
+  scenarios is not run automatically.

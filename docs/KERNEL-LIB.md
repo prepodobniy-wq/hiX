@@ -1,16 +1,17 @@
-# Писать код под hix: библиотеки и Tweaks
+# Writing code for hix: libraries and Tweaks
 
-Три способа добавить своё, от простого к глубокому.
+Three ways to add your own, from simple to deep.
 
-## 1. Программа кольца 3 (user/apps, libhix)
+## 1. Ring 3 program (user/apps, libhix)
 
-Файл `user/apps/имя.c`, `main(argc, argv)`, `make` — программа в `/bin`. Безопасно: упала
-программа — ядро живо. См. SDK.md.
+A file `user/apps/name.c`, `main(argc, argv)`, `make` — the program is in
+`/bin`. Safe: if the program crashes, the kernel survives. See SDK.md.
 
-## 2. Tweak: расширение системы на C++
+## 2. Tweak: a system extension in C++
 
-Tweak подключается к работающей системе через события, свойства и сервисы и включается
-командой `tweak on <имя>` без перезагрузки. Файл `gantry/tweaks/мой.cpp`:
+A tweak connects to a running system through events, properties and services
+and is enabled with `tweak on <name>` without a reboot. The file
+`gantry/tweaks/my.cpp`:
 
 ```cpp
 #include <gantry/tweak.h>
@@ -32,35 +33,36 @@ private:
 GANTRY_TWEAK(Hello);
 ```
 
-Примеры — `gantry/tweaks/procwatch.cpp`. Что доступно внутри:
+Examples are in `gantry/tweaks/procwatch.cpp`. What is available inside:
 
-| Что | Где | Зачем |
+| What | Where | Why |
 |---|---|---|
-| `Notifier::subscribe/post` | `gantry/kit.h` | события (`proc.spawn`, `proc.exit`, `tweak.on`, свои темы) |
-| `Properties::set/get` | `gantry/kit.h` | общее дерево свойств, видно из кольца 3 через `kit.prop` |
-| `Services::publish` + `Service::call` | `gantry/kit.h` | свой вызываемый сервис (Kit) |
-| `Driver` + `GANTRY_DRIVER` | `gantry/gantry.h` | драйвер с подбором по оценке |
-| `Registry` / `Node` | `gantry/gantry.h` | дерево устройств и сервисов |
-| `kmalloc/kfree`, `list.h`, `spinlock.h`, `printk` | `hix/*`, `aether/*` | обычные средства ядра |
+| `Notifier::subscribe/post` | `gantry/kit.h` | events (`proc.spawn`, `proc.exit`, `tweak.on`, custom topics) |
+| `Properties::set/get` | `gantry/kit.h` | shared property tree, visible from ring 3 via `kit.prop` |
+| `Services::publish` + `Service::call` | `gantry/kit.h` | your own callable service (Kit) |
+| `Driver` + `GANTRY_DRIVER` | `gantry/gantry.h` | driver with score-based matching |
+| `Registry` / `Node` | `gantry/gantry.h` | device and service tree |
+| `kmalloc/kfree`, `list.h`, `spinlock.h`, `printk` | `hix/*`, `aether/*` | standard kernel facilities |
 
-Правила: без исключений и RTTI; обработчик события может выполняться в контексте
-любого потока, не блокируйтесь в нём; `new`/`delete` работают (`lib/new.cpp`).
+Rules: no exceptions or RTTI; an event handler may run in the context of any
+thread, do not block in it; `new`/`delete` work (`lib/new.cpp`).
 
-## 3. Rust-модуль ядра (rust/hix-core)
+## 3. Rust kernel module (rust/hix-core)
 
-`no_std` staticlib для i686, C ABI `hix_rust_*`. Годится для алгоритмов и
-небольших проверенных модулей, где нужна память без libc. Сейчас там
-ChaCha20-Poly1305 за `SYS_crypto`. Правила: без аллокаций, SSE/MMX/x87,
-исключений и Linux-вызовов; паника уходит в `panic()` ядра. Сборка
-необязательна (`make RUST=0`), подробности — [CRYPTO.md](CRYPTO.md);
-полный `rust/README.md` лежит в исходном архиве.
+A `no_std` staticlib for i686, C ABI `hix_rust_*`. Suitable for algorithms and
+small verified modules that need memory without libc. It currently contains
+ChaCha20-Poly1305 behind `SYS_crypto`. Rules: no allocations, SSE/MMX/x87,
+exceptions or Linux calls; a panic goes to the kernel `panic()`. The build is
+optional (`make RUST=0`), details in [CRYPTO.md](CRYPTO.md); the full
+`rust/README.md` is in the source archive.
 
-## 4. Ядро (hix, aether, qubix, steel)
+## 4. Kernel (hix, aether, qubix, steel)
 
-Чистый C, Linux coding style, `make check` проверяет стиль. Новые модули добавляйте
-вместе с хост-тестом в `tests/`.
+Pure C, Linux coding style, `make check` verifies the style. Add new modules
+together with a host test in `tests/`.
 
-## Ограничения
+## Limitations
 
-Tweaks вкомпилированы в образ: это не загружаемые модули. Загружаемые `.ko`-подобные
-расширения потребуют ELF-релокатора в ядре и стабильного ABI; это в планах.
+Tweaks are compiled into the image: they are not loadable modules. Loadable
+`.ko`-like extensions will require an ELF relocator in the kernel and a stable
+ABI; that is on the roadmap.

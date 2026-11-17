@@ -1,29 +1,30 @@
-# Как готовится релиз
+# How a release is prepared
 
-Релиз hix — это один тег `vX.Y.Z` и один набор файлов. Версия хранится
-только в `include/hix/version.h`; ни README, ни тесты, ни Makefile не
-содержат отдельной копии номера.
+An hix release is one tag `vX.Y.Z` and one set of files. The version is stored
+only in `include/hix/version.h`; neither the README, nor the tests, nor the
+Makefile contain a separate copy of the number.
 
-## Что делает `make release`
+## What `make release` does
 
-`scripts/release.sh` намеренно не трогает git и ничего не публикует. Он
-собирает и проверяет ровно то, что попадёт в тег:
+`scripts/release.sh` intentionally does not touch git and does not publish
+anything. It builds and verifies exactly what will go into the tag:
 
-1. `make clean` — чистая сборка.
-2. `make STRICT=1 RUST=1 all` — C/C++ с `-Werror`, Rust-криптомодуль
-   обязателен, ISO обязателен.
-3. `make verify` — `check` (стиль + Multiboot), `test` (хост-тесты),
+1. `make clean` — a clean build.
+2. `make STRICT=1 RUST=1 all` — C/C++ with `-Werror`, the Rust crypto module
+   is required, the ISO is required.
+3. `make verify` — `check` (style + Multiboot), `test` (host tests),
    `rust-test`, `crypto-test`, `shots-check`.
-4. `python3 scripts/smoke.py --require-rust` — загрузка в QEMU, работа
-   через COM1: `dmesg`, splash, `uname`, `crypto`, `sysctl hix.crypto`,
-   `progs`, `kitinfo`, `lsbin`, `fstest`, `cryptotest`, `hixfetch`,
-   скринсейвер и `halt`.
-5. Упаковка.
+4. `python3 scripts/smoke.py --require-rust` — boot in QEMU, work through
+   COM1: `dmesg`, splash, `uname`, `crypto`, `sysctl hix.crypto`, `progs`,
+   `kitinfo`, `lsbin`, `fstest`, `cryptotest`, `hixfetch`, the screensaver and
+   `halt`.
+5. Packaging.
 
-Проверка не «доверяет» предыдущей сборке: `make verify` заново прогоняет
-хост-тесты и сверяет кадры, а smoke-тест грузит именно `build/hix.elf`.
+The verification does not "trust" the previous build: `make verify` reruns the
+host tests and compares frames, and the smoke test boots exactly
+`build/hix.elf`.
 
-## Результат
+## Result
 
     dist/
       SHA256SUMS
@@ -44,29 +45,31 @@
         config/hix.conf
         grub.cfg
 
-`dist/SHA256SUMS` — суммы трёх публикуемых файлов (`hix.elf`, `hix.iso`,
-`hix-1.0.0-src.tar.gz`) с теми именами, которые они получат на странице
-релиза: скачайте их в один каталог и проверьте `sha256sum -c SHA256SUMS`.
-Внутри `hix-1.0.0/SHA256SUMS` — суммы всего каталога с документацией, логами
-и кадрами; проверяйте его из корня распакованного пакета.
+`dist/SHA256SUMS` — checksums of the three published files (`hix.elf`,
+`hix.iso`, `hix-1.0.0-src.tar.gz`) under the names they will have on the
+release page: download them into one directory and check with
+`sha256sum -c SHA256SUMS`. Inside `hix-1.0.0/SHA256SUMS` are the checksums of
+the whole directory with documentation, logs and frames; check it from the
+root of the unpacked package.
 
-`BUILD-INFO` содержит версию, дату, git-коммит (если это checkout), версии
-компиляторов и размер ядра. Логи прикладываются, чтобы проверка была
-воспроизводима.
+`BUILD-INFO` contains the version, date, git commit (for a checkout), compiler
+versions and kernel size. Logs are attached so the verification is
+reproducible.
 
-## Перед запуском
+## Before running
 
-    make rust-sysroot        # если ещё нет i686 core
+    make rust-sysroot        # if the i686 core is not available yet
     scripts/hixctl doctor    # gcc -m32, nasm, grub, qemu, rust
     make release
 
-Скрипт упадёт, если нет `grub-mkrescue`, QEMU или i686 Rust: релиз не должен
-молча оказаться без ISO или без криптомодуля. `DIST=/path` меняет каталог
-вывода.
+The script fails if `grub-mkrescue`, QEMU or i686 Rust is missing: a release
+must not silently end up without an ISO or without the crypto module.
+`DIST=/path` changes the output directory.
 
-## Тег и публикация
+## Tag and publication
 
-Когда `dist/` проверен, создайте репозиторий и тег (если его ещё нет):
+When `dist/` is verified, create the repository and tag (if they do not exist
+yet):
 
     git init
     git add .
@@ -76,7 +79,7 @@
     git push -u origin main
     git push origin v1.0.0
 
-Затем опубликуйте файлы:
+Then publish the files:
 
     gh release create v1.0.0 \
         dist/hix-1.0.0/hix.elf \
@@ -86,24 +89,24 @@
         --title "hix 1.0.0" \
         --notes-file docs/releases/1.0.0.md
 
-Если GitHub CLI не настроен, приложите те же четыре файла вручную на
-странице Releases. `dist/hix-1.0.0/` (документация и логи) можно приложить
-целиком или оставить в артефактах CI — для пользователя важны ELF, ISO,
-исходники и контрольные суммы.
+If GitHub CLI is not configured, attach the same four files manually on the
+Releases page. `dist/hix-1.0.0/` (documentation and logs) can be attached in
+full or left in CI artifacts — the ELF, ISO, sources and checksums are what
+matter to the user.
 
-## После публикации
+## After publication
 
-1. Скачайте `hix.elf`, `hix.iso`, исходники и `SHA256SUMS` в чистый каталог
-   и проверьте: `sha256sum -c SHA256SUMS`.
-2. Загрузите ISO в QEMU: `qemu-system-i386 -m 128M -cdrom hix-1.0.0.iso`.
-3. Проверьте `hix.elf` через `-kernel` и `make smoke` из архива исходников.
-4. Убедитесь, что `BUILD-INFO` и `uname -a` показывают одну и ту же версию.
+1. Download `hix.elf`, `hix.iso`, the sources and `SHA256SUMS` into a clean
+   directory and verify: `sha256sum -c SHA256SUMS`.
+2. Boot the ISO in QEMU: `qemu-system-i386 -m 128M -cdrom hix-1.0.0.iso`.
+3. Check `hix.elf` with `-kernel` and `make smoke` from the source archive.
+4. Make sure `BUILD-INFO` and `uname -a` report the same version.
 
-## Что не делает скрипт
+## What the script does not do
 
-- не создаёт и не двигает теги;
-- не вызывает `gh`;
-- не публикует в GitHub Packages;
-- не собирает бинарники под другие платформы (hix — только i386).
+- it does not create or move tags;
+- it does not call `gh`;
+- it does not publish to GitHub Packages;
+- it does not build binaries for other platforms (hix is i386 only).
 
-Это сделано специально: сборка артефактов и публикация — разные решения.
+This is intentional: building artifacts and publishing are separate decisions.

@@ -1,166 +1,168 @@
-# Загрузка, настройка и скринсейверы
+# Boot, configuration and screensavers
 
-hix больше не вываливает весь журнал загрузки на экран. По умолчанию сначала
-показывается стартовый экран с логотипом, живыми часами UTC, состоянием памяти
-и криптомодуля, а затем — обычный шелл. Всё это настраивается из хоста, без
-правки C-кода.
+hix no longer dumps the entire boot log onto the screen. By default it first
+shows a splash screen with the logo, a live UTC clock, memory and crypto module
+status, and then the normal shell. All of this is configured from the host,
+without editing C code.
 
-## Быстрый старт
+## Quick start
 
-    scripts/hixctl show                    # текущая конфигурация
-    scripts/hixctl splash on               # включить стартовый экран
-    scripts/hixctl splash seconds 4        # держать его 4 секунды
-    scripts/hixctl quiet on                # не печатать info в VGA (dmesg всё помнит)
-    scripts/hixctl screensaver matrix      # выбрать скринсейвер
-    scripts/hixctl screensaver timeout 300 # 5 минут простоя
-    scripts/hixctl build                   # то же, что make
-    scripts/hixctl run --serial            # QEMU + COM1 в терминале
+    scripts/hixctl show                    # current configuration
+    scripts/hixctl splash on               # enable the splash screen
+    scripts/hixctl splash seconds 4        # keep it for 4 seconds
+    scripts/hixctl quiet on                # do not print info to VGA (dmesg keeps it)
+    scripts/hixctl screensaver matrix      # choose a screensaver
+    scripts/hixctl screensaver timeout 300 # 5 minutes idle
+    scripts/hixctl build                   # same as make
+    scripts/hixctl run --serial            # QEMU + COM1 in the terminal
 
-`scripts/hixctl` — обычный bash-скрипт, единственная точка настройки. Он
-проверяет значения и генерирует `build/hixconfig.h`, который компилируется в
-ядро. Ручная правка `config/hix.conf` тоже работает:
+`scripts/hixctl` is an ordinary bash script, the single configuration entry
+point. It validates values and generates `build/hixconfig.h`, which is compiled
+into the kernel. Editing `config/hix.conf` by hand also works:
 
-    make config        # показать файл
-    make               # перегенерировать build/hixconfig.h и собрать
+    make config        # show the file
+    make               # regenerate build/hixconfig.h and build
     scripts/hixctl check
 
-`make` и `scripts/hixctl build` эквивалентны: отдельный генератор запускать не
-нужно.
+`make` and `scripts/hixctl build` are equivalent: there is no separate
+generator to run.
 
 ## config/hix.conf
 
-| Ключ | Значения | Смысл |
+| Key | Values | Meaning |
 |---|---|---|
-| `splash` | `on` / `off` | показывать стартовый экран |
-| `splash_seconds` | число | сколько секунд он висит (любая клавиша пропускает) |
-| `quiet` | `on` / `off` | убрать info/notice из VGA-консоли |
-| `screensaver` | `stars` `matrix` `clock` `blank` | что запускать после простоя |
-| `screensaver_timeout` | число | секунды простоя; `0` выключает автозапуск |
+| `splash` | `on` / `off` | show the splash screen |
+| `splash_seconds` | number | how many seconds it stays (any key skips) |
+| `quiet` | `on` / `off` | remove info/notice from the VGA console |
+| `screensaver` | `stars` `matrix` `clock` `blank` | what to run after idle |
+| `screensaver_timeout` | number | idle seconds; `0` disables autostart |
 
-`quiet = on` не теряет сообщения: они остаются в кольцевом буфере `dmesg` и
-полностью идут в COM1. На VGA попадают только предупреждения и ошибки (уровни
-0–4), поэтому после стартового экрана ничего не «прыгает».
+`quiet = on` does not lose messages: they remain in the `dmesg` ring buffer
+and go in full to COM1. Only warnings and errors reach VGA (levels 0–4), so
+nothing "jumps" after the splash screen.
 
-## Параметры на один запуск
+## Per-boot parameters
 
-Значения из `config/hix.conf` компилируются в ядро, но загрузчик может
-перекрыть их строкой `hix.*` — без пересборки:
+Values from `config/hix.conf` are compiled into the kernel, but the bootloader
+can override them with an `hix.*` string — without rebuilding:
 
-| Параметр | Значения | Смысл |
+| Parameter | Values | Meaning |
 |---|---|---|
-| `hix.splash` | `0`/`off`, `1`/`on`, `N` | выключить, включить или держать N секунд |
-| `hix.quiet` | `0`/`off`, `1`/`on` | фильтр info/notice на VGA |
-| `hix.screensaver` | `stars` `matrix` `clock` `blank`, `off` | выбрать или выключить |
-| `hix.screensaver_timeout` | число | простой в секундах; `hix.timeout` — короче |
-| `hix.safe` | `1`/`on` | без splash, без quiet, без скринсейвера |
+| `hix.splash` | `0`/`off`, `1`/`on`, `N` | disable, enable, or keep for N seconds |
+| `hix.quiet` | `0`/`off`, `1`/`on` | filter info/notice on VGA |
+| `hix.screensaver` | `stars` `matrix` `clock` `blank`, `off` | choose or disable |
+| `hix.screensaver_timeout` | number | idle in seconds; `hix.timeout` is shorter |
+| `hix.safe` | `1`/`on` | no splash, no quiet, no screensaver |
 
-Примеры:
+Examples:
 
     qemu-system-i386 -m 128M -kernel build/hix.elf \
         -append 'hix.splash=4 hix.quiet=0 hix.screensaver=matrix hix.timeout=60'
 
     qemu-system-i386 -m 128M -kernel build/hix.elf -append 'hix.safe=1'
 
-`hix.safe=1` — быстрый способ проверить, не мешают ли загрузке splash,
-фильтрация VGA или таймеры. Неизвестные ключи и мусорные значения
-игнорируются: командная строка принадлежит ещё и загрузчику. Посмотреть
-принятые значения можно так:
+`hix.safe=1` is a quick way to check whether splash, VGA filtering or timers
+are interfering with boot. Unknown keys and garbage values are ignored: the
+command line also belongs to the bootloader. You can inspect the accepted
+values like this:
 
-    sysctl hix.boot      # скомпилированные значения + cmdline
-    sysctl kern.cmdline  # только строка загрузчика
-    dmesg | head          # строка boot config при старте
+    sysctl hix.boot      # compiled values + cmdline
+    sysctl kern.cmdline  # bootloader string only
+    dmesg | head         # boot config line at startup
 
 ## Serial console (COM1)
 
-COM1 работает всегда: ядро дублирует туда `printk`, а tty зеркалит ввод и
-вывод шелла. Поэтому `make run-serial` — не только лог, но и полноценная
-консоль: можно вводить команды, запускать `desk`, `screensaver` и
-`halt`. В GRUB для этого есть отдельный пункт `serial console`:
+COM1 always works: the kernel mirrors `printk` there, and the tty mirrors shell
+input and output. So `make run-serial` is not just a log but a full console:
+you can type commands, run `desk`, `screensaver` and `halt`. GRUB has a
+separate `serial console` entry for this:
 
     serial --unit=0 --speed=115200
     terminal_input serial
     terminal_output serial
     multiboot /boot/hix.elf hix.splash=0 hix.quiet=0
 
-Для `-kernel` достаточно `-serial stdio` (или `-serial unix:...` для
-скриптов). `scripts/smoke.py` использует именно этот путь: подключается к
-COM1 через unix-сокет и проверяет загрузку без окна.
+For `-kernel`, `-serial stdio` is enough (or `-serial unix:...` for scripts).
+`scripts/smoke.py` uses exactly this path: it connects to COM1 through a Unix
+socket and verifies boot without a window.
 
-## Стартовый экран
+## Splash screen
 
-`qubix/splash.c` — обычная программа qubix (как `sh` или `desk`): она рисует
-через fd 1 и читает клавиатуру через `libq`, ядро её не замечает. Что видно:
+`qubix/splash.c` is a normal qubix program (like `sh` or `desk`): it draws
+through fd 1 and reads the keyboard through `libq`; the kernel does not notice
+it. What you see:
 
-- широкий блочный логотип hix (CP437-полублоки), версия и слоган;
-- большие часы UTC (5 строк блочных цифр), дата и день недели;
-- строка состояния: RAM, наличие Rust/ChaCha20-Poly1305;
-- прогресс-бар и подпись этапа;
+- a wide hix block logo (CP437 half-blocks), version and tagline;
+- a large UTC clock (5 rows of block digits), date and weekday;
+- a status line: RAM, Rust/ChaCha20-Poly1305 availability;
+- a progress bar and a stage label;
 - `press any key to skip`.
 
-`init` (pid 1) запускает `splash` один раз перед первым `sh`. Если
-`splash = off` или `splash_seconds = 0`, программа сразу выходит. После
-стартового экрана шелл печатает компактную шапку вместо большого логотипа.
-Посмотреть экран ещё раз можно командой `splash` (или `splash 4`, чтобы
-задать длительность в секундах).
+`init` (pid 1) starts `splash` once before the first `sh`. If
+`splash = off` or `splash_seconds = 0`, the program exits immediately. After
+the splash screen the shell prints a compact header instead of the large logo.
+You can see the screen again with the `splash` command (or `splash 4` to set
+the duration in seconds).
 
-Часы берутся из CMOS RTC через `gettimeofday()`; время всегда UTC, как и в
-команде `date`.
+The clock comes from the CMOS RTC via `gettimeofday()`; time is always UTC, as
+in the `date` command.
 
-## Скринсейверы
+## Screensavers
 
-    screensaver            # из конфигурации, обычно stars
+    screensaver            # from the configuration, usually stars
     screensaver stars
     screensaver matrix
     screensaver clock
     screensaver blank
 
-Любая клавиша возвращает в шелл. После `screensaver_timeout` секунд без
-ввода шелл сам запускает выбранный скринсейвер; набранная, но не отправленная
-строка не теряется — после пробуждения приглашение перерисовывается вместе с
-ней. `screensaver_timeout = 0` отключает автозапуск.
+Any key returns to the shell. After `screensaver_timeout` seconds without
+input, the shell starts the selected screensaver itself; a line that was typed
+but not submitted is not lost — after waking up, the prompt is redrawn together
+with it. `screensaver_timeout = 0` disables autostart.
 
-| Имя | Что рисует |
+| Name | What it draws |
 |---|---|
-| `stars` | падающее звёздное поле, три яркости |
-| `matrix` | зелёный дождь глифов с затухающим хвостом |
-| `clock` | большие часы UTC, дата и uptime |
-| `blank` | чёрный экран |
+| `stars` | falling star field, three brightness levels |
+| `matrix` | green rain of glyphs with a fading tail |
+| `clock` | large UTC clock, date and uptime |
+| `blank` | black screen |
 
-Скринсейверы тоже сделаны как qprog-программы (`qubix/screensaver.c`), а не
-как часть ядра. Поэтому их можно запускать вручную, из шелла, и они не мешают
-`printk`: сообщения ядра по-прежнему попадают в `dmesg`, а VGA-консоль в это
-время просто не перерисовывается при `quiet`.
+Screensavers are also implemented as qprog programs (`qubix/screensaver.c`),
+not as part of the kernel. Therefore they can be started manually from the
+shell, and they do not interfere with `printk`: kernel messages still go to
+`dmesg`, while the VGA console is simply not redrawn during `quiet`.
 
-## Добавить свой скринсейвер
+## Adding your own screensaver
 
-1. Написать функцию рисования в `qubix/screensaver.c`, которая крутится, пока
-   `key_now()` не вернёт true.
-2. Добавить имя в разбор `screensaver_main()` и в проверку
-   `scripts/hixctl` (`valid_value`) — тогда значение можно ставить из конфига.
-3. При желании добавить строку в `help` шелла.
+1. Write a drawing function in `qubix/screensaver.c` that loops until
+   `key_now()` returns true.
+2. Add the name to the `screensaver_main()` parser and to the
+   `scripts/hixctl` check (`valid_value`) — then the value can be set from the
+   config.
+3. Optionally add a line to the shell `help`.
 
-Никакого нового системного вызова не нужно: программа уже умеет читать
-клавиатуру в raw-режиме с таймаутом.
+No new system call is needed: the program can already read the keyboard in
+raw mode with a timeout.
 
-## Сборка и зависимости
+## Build and dependencies
 
-`build/hixconfig.h` подключается через `include/hix/bootconfig.h`. Если файла
-нет (хост-тесты, отдельные инструменты), действуют старые значения: splash
-выключен, quiet выключен, таймаут 0. Это позволяет собирать `tests/` без
-Makefile-обвязки ядра.
+`build/hixconfig.h` is included through `include/hix/bootconfig.h`. If the
+file is missing (host tests, standalone tools), the old values apply: splash
+off, quiet off, timeout 0. This allows building `tests/` without the kernel
+Makefile wrapper.
 
-При изменении конфигурации пересобираются только файлы, которые включают
-`bootconfig.h` (`splash.c`, `screensaver.c`, `shell.c`, `console.c`): обычная
-зависимость берётся из `.d`-файлов GCC, а сам заголовок создаётся
-order-only-правилом. Полная пересборка не нужна.
+When the configuration changes, only the files that include `bootconfig.h`
+are rebuilt (`splash.c`, `screensaver.c`, `shell.c`, `console.c`): the normal
+dependency comes from GCC `.d` files, and the header itself is created by an
+order-only rule. A full rebuild is not needed.
 
-## Ограничения
+## Limitations
 
-- Гостевого bash нет: qubix использует собственный шелл. `scripts/hixctl` —
-  хостовый bash-слой; значения по умолчанию компилируются в ядро, а `hix.*`
-  в командной строке загрузчика действуют на один запуск.
-- В VGA-тексте нет курсора-«часиков» и произвольной графики: только 80x25,
-  16 цветов и CP437. Логотип использует полублоки CP437, а не UTF-8: так он
-  одинаково выглядит в VGA-тексте и в пиксельной консоли.
-- `quiet` влияет только на VGA. COM1 и `dmesg` остаются подробными — это
-  сделано специально для отладки; COM1 при этом ещё и принимает ввод.
+- There is no guest bash: qubix uses its own shell. `scripts/hixctl` is the
+  host bash layer; defaults are compiled into the kernel, and `hix.*` on the
+  boot command line apply to one boot.
+- VGA text has no "busy" cursor and no arbitrary graphics: only 80x25,
+  16 colors and CP437. The logo uses CP437 half-blocks rather than UTF-8, so it
+  looks the same in VGA text and in the pixel console.
+- `quiet` affects only VGA. COM1 and `dmesg` remain detailed — this is
+  intentional for debugging; COM1 also accepts input.
